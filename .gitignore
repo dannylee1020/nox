@@ -1,0 +1,12 @@
+# Nox run state
+.nox/
+
+# Go
+/bin/
+*.test
+coverage.out
+
+# Local tooling
+.DS_Store
+.kkt/
+memory/
