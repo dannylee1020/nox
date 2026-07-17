@@ -12,9 +12,6 @@ local Git ref
   → teardown
 ```
 
-> [!IMPORTANT]
-> Nox v0 runs on Linux Docker or macOS through Colima. It does not provision remote hosts or provide hosted execution.
-
 ## Install
 
 Nox v0 installs everything needed for local Codex execution with one command:
