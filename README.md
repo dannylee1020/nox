@@ -15,7 +15,7 @@ local Git ref
 ```
 
 > [!IMPORTANT]
-> Nox is currently a local v0 intended for testing on a Linux Docker host. It does not yet provision a Linux VM for macOS or provide hosted execution.
+> Nox v0 runs locally on a Linux Docker host or on macOS through Colima. It does not provision remote hosts or provide hosted execution.
 
 ## What Nox guarantees
 
@@ -30,33 +30,46 @@ local Git ref
 
 ## Requirements
 
-- Linux Docker daemon with the `runsc` runtime registered
+The curl installer downloads the source archive and builds Nox locally, so it requires `curl`, `tar`, and Go compatible with the version declared in `go.mod`. Direct checkout installs only require Go.
+
+For local execution, Nox also requires:
+
 - Git and Docker CLI
-- Go compatible with the version declared in `go.mod`
-- Locally built `nox-runner:v0` image
+- Linux Docker daemon with the `runsc` runtime registered, or macOS with Colima
 - Codex authentication under `~/.codex` when using the Codex adapter
 
-On macOS, use a Linux-backed Docker context such as a dedicated Colima profile with `runsc` registered. Nox transfers the workspace and Codex home into VM-native Docker volumes, so the Docker daemon does not need to write directly to the macOS filesystem.
+On macOS, the local installer can install the Docker CLI and Colima with Homebrew, create a dedicated Colima profile, install and register `runsc`, build the runner image, and run `nox doctor`. Homebrew itself must already be installed. On Linux, it expects Docker and `runsc` to already be installed and registered; the installer does not modify the host Docker installation.
+
+For a Linux host, install Docker and follow the [gVisor installation instructions](https://gvisor.dev/docs/user_guide/install/), then register the runtime and verify it before running the installer:
+
+```bash
+sudo /usr/local/bin/runsc install
+sudo systemctl restart docker
+docker info --format '{{json .Runtimes}}'
+```
 
 ## Install
 
-Build a project-local binary:
+The v0 installer downloads the source archive and builds Nox locally because Nox does not publish release artifacts yet:
 
 ```bash
-mkdir -p bin
-go build -o bin/nox ./cmd/nox
+curl -fsSL https://raw.githubusercontent.com/nox-dev/nox/main/install.sh | bash
 ```
 
-Build the runner image:
+This builds the CLI into `~/.local/bin/nox`. Add that directory to `PATH` if needed.
+
+To install the CLI and prepare the local execution backend in one step:
 
 ```bash
-docker build -t nox-runner:v0 images/runner
+curl -fsSL https://raw.githubusercontent.com/nox-dev/nox/main/install.sh | bash -s -- --local
 ```
 
-Confirm that Docker can start the image with gVisor:
+You can also run `./install.sh` directly from a Nox checkout.
+
+On macOS, `--local` provisions the `nox` Colima profile and registers `runsc`. It selects the matching `colima-nox` Docker context for subsequent Nox commands; use `docker context use <name>` to switch back later. On Linux, it validates the existing Docker/`runsc` setup. It also builds the default `nox-runner:v0` image and runs:
 
 ```bash
-./bin/nox doctor
+nox doctor
 ```
 
 Expected output:
@@ -65,14 +78,29 @@ Expected output:
 ok: Docker can run nox-runner:v0 with runsc
 ```
 
+Useful installer overrides:
+
+```bash
+NOX_COLIMA_CPUS=4 \
+NOX_COLIMA_MEMORY=8 \
+NOX_COLIMA_DISK=40 \
+./install.sh --local
+```
+
+Use `./install.sh --help` for all options, including custom install prefixes, Colima profiles, runner image tags, and gVisor release paths. If you use a custom runner image, pass the same tag to `nox launch --image <tag>`.
+
+The installer uses the mutable `latest` gVisor release path by default. Set `NOX_GVISOR_VERSION` or `--gvisor-version` for a reproducible release path. For a reproducible source install, set `NOX_SOURCE_REF` to a 40-character commit SHA or provide `NOX_SOURCE_ARCHIVE_URL`.
+
 ## Quick start
+
+`nox launch` defaults to `--network online`; use `--network none` for offline runs.
 
 ### Deterministic local agent
 
 Use the generic adapter to verify the full lifecycle without calling a hosted model:
 
 ```bash
-./bin/nox launch \
+nox launch \
   --repo . \
   --from main \
   --output-branch nox/generic-smoke \
@@ -88,7 +116,7 @@ Use the generic adapter to verify the full lifecycle without calling a hosted mo
 Nox includes a built-in Codex adapter. No separate skill or integration layer is required:
 
 ```bash
-./bin/nox launch \
+nox launch \
   --repo . \
   --from main \
   --output-branch nox/fix-auth \
@@ -133,7 +161,7 @@ If the agent makes no changes, Nox completes without creating a branch. Agent fa
 
 ## Sandbox guardrails
 
-Every workload uses:
+The agent and validation workload container uses:
 
 - Docker's `runsc` runtime
 - Non-root UID and GID `1000:1000`
@@ -145,6 +173,8 @@ Every workload uses:
 - No Docker socket
 - A VM-native, isolated workspace volume
 - An optional Codex authentication volume staged from the host and mounted read-only as the source for a disposable in-container Codex home
+
+Short-lived runsc helper containers are used only to transfer workspace and Codex files into or out of VM-native volumes. They have no network access and are not the agent execution boundary.
 
 Network access is intentionally coarse in v0:
 
@@ -162,10 +192,10 @@ Online sandbox code can read staged Codex credentials and may attempt to exfiltr
 Run state is stored under `~/.nox/runs/<run-id>` and may include metadata, logs, a patch, and a retained failed workspace. Active workspaces and staged Codex data are held in labeled Docker volumes and removed during teardown.
 
 ```bash
-./bin/nox inspect <run-id>   # print run metadata
-./bin/nox diff <run-id>      # print the published patch
-./bin/nox cleanup <run-id>   # remove one run, its container, and volumes
-./bin/nox cleanup --stale    # remove all Nox-managed containers and volumes
+nox inspect <run-id>   # print run metadata
+nox diff <run-id>      # print the published patch
+nox cleanup <run-id>   # remove one run, its container, and volumes
+nox cleanup --stale    # remove all Nox-managed containers and volumes
 ```
 
 ## Command overview
@@ -182,14 +212,14 @@ nox cleanup --stale
 Run command-specific help for available options:
 
 ```bash
-./bin/nox launch --help
+nox launch --help
 ```
 
 ## Current limitations
 
 Nox v0 intentionally does not:
 
-- Provision a Linux VM for macOS
+- Provision remote hosts or provide hosted execution
 - Push branches or open pull requests
 - Check out or modify the source worktree
 - Overwrite an existing local branch
