@@ -72,16 +72,16 @@ func TestCreateUsesRunscAndMinimumGuardrails(t *testing.T) {
 	}
 	args := strings.Join(fake.commands[0].Args, " ")
 	for _, want := range []string{
-		"create", "--runtime runsc", "--user 1000:1000", "--cap-drop ALL",
+		"create", "--runtime runsc", "--user 0:0",
 		"--security-opt no-new-privileges:true", "--network bridge", "--pids-limit 256",
 		"type=volume,src=nox-abc123-workspace,dst=/workspace", "type=volume,src=nox-abc123-codex,dst=/home/nox/.codex-ro,readonly",
-		"--tmpfs /tmp:rw,noexec,nosuid,size=256m", "--tmpfs /var/tmp:rw,exec,nosuid,size=512m",
+		"--tmpfs /tmp:rw,exec,nosuid,size=256m", "--tmpfs /var/tmp:rw,exec,nosuid,size=512m",
 	} {
 		if !strings.Contains(args, want) {
 			t.Errorf("args missing %q: %s", want, args)
 		}
 	}
-	if strings.Contains(args, "--privileged") || strings.Contains(args, "--network host") || strings.Contains(args, "docker.sock") {
+	if strings.Contains(args, "--privileged") || strings.Contains(args, "--cap-add") || strings.Contains(args, "--cap-drop") || strings.Contains(args, "--network host") || strings.Contains(args, "docker.sock") {
 		t.Fatalf("forbidden guardrail in args: %s", args)
 	}
 }

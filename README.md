@@ -1,6 +1,6 @@
 # Nox
 
-Nox is a local sandbox for coding agents. It runs agent code in an isolated environment for safer execution, then publishes changes to a new local branch when your validation command succeeds. Your original checkout is never mounted, modified, or switched.
+Nox is a local sandbox for coding agents. It runs agent code in an isolated environment for safer execution, then publishes changes to a new local branch. Your original checkout is never mounted, modified, or switched.
 
 ```text
 local Git ref
@@ -85,7 +85,12 @@ nox launch \
 
 ### Codex
 
-The Codex adapter is built in and requires authentication under `~/.codex`:
+The Codex adapter is built in and requires authentication under `~/.codex`.
+Nox invokes Codex with `codex exec --dangerously-bypass-approvals-and-sandbox --ephemeral -`.
+This is Codex's full-autonomy mode: Codex receives no approval prompts and no inner
+Codex sandbox restrictions. The outer Nox `runsc` container remains the isolation
+boundary. Host- or organization-managed Codex requirements may still restrict this
+mode; Nox cannot override those policies.
 
 ```bash
 nox launch \
@@ -115,11 +120,17 @@ Each launch:
 
 Nox never checks out, pushes, or opens a pull request. No branch is created if there are no changes or if the agent, validation, export, cancellation, timeout, or branch-collision path fails.
 
+At launch start, Nox prints the run ID and a monitoring command:
+
+```text
+run: <run-id>
+watch: nox watch <run-id>
+```
+
 On success:
 
 ```text
 completed: created local branch nox/fix-auth at <sha>
-run: <run-id>
 next: git switch nox/fix-auth
 ```
 
@@ -128,8 +139,9 @@ next: git switch nox/fix-auth
 The agent and validation container uses:
 
 - Docker's `runsc` runtime, with no fallback to `runc`
-- Non-root UID/GID `1000:1000`
-- All Linux capabilities dropped and `no-new-privileges`
+- Root UID/GID `0:0` inside the disposable gVisor sandbox
+- Docker's default bounded capability set and `no-new-privileges`
+- An executable disposable `/tmp` for package managers and test runners
 - CPU, memory, and PID limits
 - No host networking, published ports, or Docker socket
 - An isolated VM-native workspace volume
@@ -152,12 +164,15 @@ Nox v0 does not broker credentials or filter domains and metadata services. Use 
 
 ## Runs and commands
 
-Run state lives under `~/.nox/runs/<run-id>` and may contain metadata, logs, a patch, and a retained failed workspace. Active workspace and Codex data live in labeled Docker volumes removed during teardown.
+Run state lives under `~/.nox/runs/<run-id>` and may contain metadata, `agent.log`, `validation.log`, a patch, and a retained failed workspace. Active workspace and Codex data live in labeled Docker volumes removed during teardown. Use `nox watch <run-id>` to follow state transitions and logs from another terminal. E2E evidence is stored separately under `~/.nox/evidence/v0/`.
+
+Published result commits use the effective `user.name` and `user.email` from the source repository. Nox fails before sandbox startup if either identity is not configured.
 
 ```text
 nox doctor
 nox launch --repo <path> --from <ref> --output-branch <branch> [options]
 nox inspect <run-id>       # print metadata
+nox watch <run-id>         # follow lifecycle and logs
 nox diff <run-id>          # print the published patch
 nox cleanup <run-id>       # remove the run, container, and volumes
 nox cleanup --stale        # remove all Nox-managed containers and volumes

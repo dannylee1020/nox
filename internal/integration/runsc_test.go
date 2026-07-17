@@ -74,6 +74,9 @@ func TestRunscGenericLaunch(t *testing.T) {
 	if parent := gitOutput(t, source, "rev-parse", resultSHA+"^1"); parent != base {
 		t.Fatalf("result parent = %s, want %s", parent, base)
 	}
+	if author := gitOutput(t, source, "show", "-s", "--format=%an <%ae>|%cn <%ce>", resultSHA); author != "Integration User <integration@example.com>|Integration User <integration@example.com>" {
+		t.Fatalf("result identity = %q", author)
+	}
 	if got := gitOutput(t, source, "show", "nox/integration:generated.txt"); got != "integration-ok" {
 		t.Fatalf("generated.txt = %q", got)
 	}
@@ -98,6 +101,8 @@ func runnerImage() string {
 func initIntegrationRepo(t *testing.T, dir string) {
 	t.Helper()
 	gitRun(t, dir, "init", "-b", "main")
+	gitRun(t, dir, "config", "user.name", "Integration User")
+	gitRun(t, dir, "config", "user.email", "integration@example.com")
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("base\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

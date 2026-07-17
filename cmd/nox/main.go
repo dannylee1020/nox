@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/nox-dev/nox/internal/execx"
@@ -20,6 +22,7 @@ import (
 const usageText = `Nox runs a coding agent inside a local Docker/gVisor sandbox.
 
 Commands:
+  nox watch <run-id>
   nox doctor
   nox launch --repo . --from main --output-branch nox/change --agent codex --task "..." --validate "..."
   nox inspect <run-id>
@@ -35,6 +38,8 @@ func main() {
 	}
 	var err error
 	switch os.Args[1] {
+	case "watch":
+		err = watch(os.Args[2:])
 	case "doctor":
 		err = doctor(os.Args[2:])
 	case "launch":
@@ -127,12 +132,18 @@ func launch(args []string) error {
 	if *jsonOutput {
 		output = io.Discard
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	orchestrator := run.New()
-	result, err := orchestrator.Launch(context.Background(), run.Config{
+	result, err := orchestrator.Launch(ctx, run.Config{
 		Repo: *repo, From: *from, OutputBranch: *outputBranch, Agent: *agentName,
 		AgentCommand: *agentCommand, Task: *task, Validation: *validate, Network: *network,
 		Image: *image, StateRoot: *stateRoot, CodexHome: *codexHome, CPU: *cpu, Memory: *memory,
 		PIDs: *pids, Timeout: *timeout, Output: output, ErrorOutput: os.Stderr,
+		OnStart: func(metadata store.Metadata) error {
+			_, err := fmt.Fprintf(os.Stderr, "run: %s\nwatch: nox watch %s\n", metadata.RunID, metadata.RunID)
+			return err
+		},
 	})
 	if *jsonOutput {
 		return printJSON(result, err)
@@ -141,10 +152,10 @@ func launch(args []string) error {
 		return err
 	}
 	if result.NoChanges {
-		fmt.Printf("completed: no changes; no branch created\nrun: %s\n", result.Metadata.RunID)
+		fmt.Printf("completed: no changes; no branch created\n")
 		return nil
 	}
-	fmt.Printf("completed: created local branch %s at %s\nrun: %s\nnext: git switch %s\n", result.Metadata.OutputBranch, result.Metadata.ResultSHA, result.Metadata.RunID, result.Metadata.OutputBranch)
+	fmt.Printf("completed: created local branch %s at %s\nnext: git switch %s\n", result.Metadata.OutputBranch, result.Metadata.ResultSHA, result.Metadata.OutputBranch)
 	return nil
 }
 

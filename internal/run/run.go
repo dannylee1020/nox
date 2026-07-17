@@ -37,6 +37,7 @@ type Config struct {
 	Timeout      time.Duration
 	Output       io.Writer
 	ErrorOutput  io.Writer
+	OnStart      func(store.Metadata) error
 }
 
 type Result struct {
@@ -122,12 +123,15 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 	workspace := filepath.Join(runDir, "workspace")
 	metadata := store.Metadata{
 		RunID: id, Repo: config.Repo, From: config.From, OutputBranch: config.OutputBranch,
-		Agent: adapter.Name(), Validation: config.Validation, Network: config.Network,
-		Image: config.Image, State: store.StateInitializing, StartedAt: time.Now(), Workspace: workspace,
+		Agent: adapter.Name(), AgentPermissions: adapter.PermissionMode(), Validation: config.Validation,
+		Network: config.Network, Image: config.Image, State: store.StateInitializing,
+		StartedAt: time.Now(), Workspace: workspace,
 	}
 	var workspaceVolume string
 	var codexVolume string
 	var workspaceExported bool
+	var container sandbox.Container
+	var terminalState store.State
 	exportWorkspace := func() error {
 		if workspaceVolume == "" || workspaceExported {
 			return nil
@@ -149,9 +153,9 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 		workspaceExported = true
 		return nil
 	}
-	writeState := func(state store.State) {
+	writeState := func(state store.State) error {
 		metadata.State = state
-		_ = o.Store.WriteMetadata(metadata)
+		return o.Store.WriteMetadata(metadata)
 	}
 	fail := func(failErr error) (Result, error) {
 		if workspaceVolume != "" && !workspaceExported {
@@ -160,17 +164,76 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 			}
 		}
 		if IsCancelled(failErr) {
-			metadata.State = store.StateCancelled
+			terminalState = store.StateCancelled
 		} else {
-			metadata.State = store.StateFailed
+			terminalState = store.StateFailed
 		}
 		metadata.Error = failErr.Error()
-		metadata.CompletedAt = time.Now()
 		metadata.Retained = true
 		_ = o.Store.WriteMetadata(metadata)
 		return Result{Metadata: metadata}, failErr
 	}
-	writeState(store.StateInitializing)
+	if err := writeState(store.StateInitializing); err != nil {
+		return result, fmt.Errorf("write initial run metadata: %w", err)
+	}
+	defer func() {
+		if terminalState == "" {
+			if err != nil {
+				if IsCancelled(err) {
+					terminalState = store.StateCancelled
+				} else {
+					terminalState = store.StateFailed
+				}
+			} else {
+				terminalState = metadata.State
+			}
+		}
+		metadata.State = store.StateTeardown
+		_ = o.Store.WriteMetadata(metadata)
+		teardownCtx, teardownCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer teardownCancel()
+		if container.ID != "" {
+			if removeErr := o.Docker.Remove(teardownCtx, container); removeErr != nil {
+				if err == nil {
+					err = removeErr
+					terminalState = store.StateFailed
+					metadata.Retained = true
+				}
+				metadata.Error = appendError(metadata.Error, removeErr)
+			}
+		}
+		if workspaceVolume != "" {
+			if removeErr := o.Docker.RemoveVolume(teardownCtx, workspaceVolume); removeErr != nil {
+				if err == nil {
+					err = removeErr
+					terminalState = store.StateFailed
+					metadata.Retained = true
+				}
+				metadata.Error = appendError(metadata.Error, removeErr)
+			}
+		}
+		if codexVolume != "" {
+			if removeErr := o.Docker.RemoveVolume(teardownCtx, codexVolume); removeErr != nil {
+				if err == nil {
+					err = removeErr
+					terminalState = store.StateFailed
+					metadata.Retained = true
+				}
+				metadata.Error = appendError(metadata.Error, removeErr)
+			}
+		}
+		if metadata.CompletedAt.IsZero() {
+			metadata.CompletedAt = time.Now()
+		}
+		metadata.State = terminalState
+		_ = o.Store.WriteMetadata(metadata)
+		result.Metadata = metadata
+	}()
+	if config.OnStart != nil {
+		if err := config.OnStart(metadata); err != nil {
+			return fail(fmt.Errorf("announce run %s: %w", id, err))
+		}
+	}
 
 	// resolve the source repository and clone the exact base commit.
 	root, err := o.Git.RepoRoot(ctx, config.Repo)
@@ -192,8 +255,18 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 	if err := o.Git.ValidateBranch(ctx, root, config.OutputBranch); err != nil {
 		return fail(err)
 	}
+	identity, err := o.Git.Identity(ctx, root)
+	if err != nil {
+		return fail(err)
+	}
+	metadata.CommitAuthor = identity.Name + " <" + identity.Email + ">"
+	if err := o.Store.WriteMetadata(metadata); err != nil {
+		return fail(err)
+	}
 
-	writeState(store.StateCloning)
+	if err := writeState(store.StateCloning); err != nil {
+		return fail(err)
+	}
 	if err := o.Git.CloneAt(ctx, root, baseSHA, workspace); err != nil {
 		return fail(err)
 	}
@@ -219,46 +292,6 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 	metadata.WorkspaceVolume = workspaceVolume
 	_ = o.Store.WriteMetadata(metadata)
 
-	// Teardown runs on every path after the workspace volume is created.
-	var container sandbox.Container
-	defer func() {
-		terminalState := metadata.State
-		metadata.State = store.StateTeardown
-		_ = o.Store.WriteMetadata(metadata)
-		teardownCtx, teardownCancel := context.WithTimeout(context.Background(), time.Minute)
-		defer teardownCancel()
-		if container.ID != "" {
-			if removeErr := o.Docker.Remove(teardownCtx, container); removeErr != nil {
-				if err == nil {
-					err = removeErr
-					terminalState = store.StateFailed
-					metadata.Retained = true
-				}
-				metadata.Error = appendError(metadata.Error, removeErr)
-			}
-		}
-		if removeErr := o.Docker.RemoveVolume(teardownCtx, workspaceVolume); removeErr != nil {
-			if err == nil {
-				err = removeErr
-				terminalState = store.StateFailed
-				metadata.Retained = true
-			}
-			metadata.Error = appendError(metadata.Error, removeErr)
-		}
-		if codexVolume != "" {
-			if removeErr := o.Docker.RemoveVolume(teardownCtx, codexVolume); removeErr != nil {
-				if err == nil {
-					err = removeErr
-					terminalState = store.StateFailed
-					metadata.Retained = true
-				}
-				metadata.Error = appendError(metadata.Error, removeErr)
-			}
-		}
-		metadata.State = terminalState
-		_ = o.Store.WriteMetadata(metadata)
-		result.Metadata = metadata
-	}()
 	if err := o.Docker.SeedWorkspace(ctx, workspaceVolume, workspace, config.Image, id); err != nil {
 		return fail(err)
 	}
@@ -284,8 +317,13 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 		return fail(err)
 	}
 	metadata.ContainerID = container.ID
-	writeState(store.StateStarting)
+	if err := writeState(store.StateStarting); err != nil {
+		return fail(err)
+	}
 	if err := o.Docker.Start(ctx, container); err != nil {
+		return fail(err)
+	}
+	if err := o.Docker.PrepareWorkspace(ctx, container); err != nil {
 		return fail(err)
 	}
 	if codexVolume != "" {
@@ -301,7 +339,9 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 	}
 	defer agentLog.Close()
 	agentOut := io.MultiWriter(agentLog, config.Output)
-	writeState(store.StateAgentRunning)
+	if err := writeState(store.StateAgentRunning); err != nil {
+		return fail(err)
+	}
 	agentResult, err := agent.Run(ctx, o.Docker, container, adapter, strings.NewReader(config.Task), agentOut, agentLog)
 	metadata.ExitCode = agentResult.ExitCode
 	if err != nil || agentResult.ExitCode != 0 {
@@ -317,7 +357,9 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 		return fail(err)
 	}
 	defer validationLog.Close()
-	writeState(store.StateValidating)
+	if err := writeState(store.StateValidating); err != nil {
+		return fail(err)
+	}
 	validationOut := io.MultiWriter(validationLog, config.Output)
 	validationResult, validationErr := o.Docker.Exec(ctx, container, []string{"sh", "-lc", config.Validation}, nil, validationOut, validationLog)
 	metadata.ValidationCode = validationResult.ExitCode
@@ -333,19 +375,19 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 	}
 
 	// publish only validated changes as a local host-side branch.
-	writeState(store.StatePublishing)
+	if err := writeState(store.StatePublishing); err != nil {
+		return fail(err)
+	}
 	commitMessage := "nox: " + summarizeTask(config.Task)
-	resultSHA, changed, publishErr := o.Git.Publish(ctx, root, baseSHA, config.OutputBranch, workspace, commitMessage)
+	resultSHA, changed, publishErr := o.Git.Publish(ctx, root, baseSHA, config.OutputBranch, workspace, commitMessage, identity)
 	if publishErr != nil {
 		return fail(publishErr)
 	}
 	if !changed {
 		// a successful no-change run does not create a result branch.
-		metadata.State = store.StateCompleted
-		metadata.CompletedAt = time.Now()
+		terminalState = store.StateCompleted
 		metadata.Retained = false
 		_ = o.Store.WriteText(id, "changes.patch", "")
-		_ = o.Store.WriteMetadata(metadata)
 		_ = o.Store.RemoveWorkspace(id)
 		result.Metadata = metadata
 		result.NoChanges = true
@@ -353,14 +395,10 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 	}
 	// save the result evidence and remove the successful workspace.
 	metadata.ResultSHA = resultSHA
-	metadata.State = store.StateCompleted
-	metadata.CompletedAt = time.Now()
+	terminalState = store.StateCompleted
 	metadata.Retained = false
 	if patch, patchErr := o.Git.CommitPatch(ctx, root, baseSHA, resultSHA); patchErr == nil {
 		_ = o.Store.WriteText(id, "changes.patch", patch)
-	}
-	if err := o.Store.WriteMetadata(metadata); err != nil {
-		return result, err
 	}
 	_ = o.Store.RemoveWorkspace(id)
 	result.Metadata = metadata

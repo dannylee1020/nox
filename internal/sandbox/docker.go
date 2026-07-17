@@ -110,8 +110,7 @@ func (d Docker) Create(ctx context.Context, config Config) (Container, error) {
 		"--name", "nox-" + config.RunID,
 		"--label", "io.nox.managed=true",
 		"--label", "io.nox.run-id=" + config.RunID,
-		"--user", "1000:1000",
-		"--cap-drop", "ALL",
+		"--user", "0:0",
 		"--security-opt", "no-new-privileges:true",
 		"--cpus", config.CPU,
 		"--memory", config.Memory,
@@ -119,7 +118,7 @@ func (d Docker) Create(ctx context.Context, config Config) (Container, error) {
 		"--network", network,
 		"--workdir", "/workspace",
 		"--mount", "type=volume,src=" + config.WorkspaceVolume + ",dst=/workspace",
-		"--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
+		"--tmpfs", "/tmp:rw,exec,nosuid,size=256m",
 		"--tmpfs", "/var/tmp:rw,exec,nosuid,size=512m",
 	}
 	if config.CodexHomeVolume != "" {
@@ -232,6 +231,14 @@ func (d Docker) createWorkspaceHelper(ctx context.Context, volume, image, runID,
 func (d Docker) Start(ctx context.Context, container Container) error {
 	if _, err := d.Runner.Run(ctx, execx.Command{Name: "docker", Args: []string{"start", container.ID}}); err != nil {
 		return fmt.Errorf("start container: %w", err)
+	}
+	return nil
+}
+
+func (d Docker) PrepareWorkspace(ctx context.Context, container Container) error {
+	_, err := d.Exec(ctx, container, []string{"git", "config", "--global", "--add", "safe.directory", "/workspace"}, nil, io.Discard, io.Discard)
+	if err != nil {
+		return fmt.Errorf("prepare workspace Git trust: %w", err)
 	}
 	return nil
 }

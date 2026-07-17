@@ -24,11 +24,16 @@ type Adapter interface {
 	Name() string
 	Environment() map[string]string
 	Command() []string
+	PermissionMode() string
 }
 
 type Codex struct{}
 
 func (Codex) Name() string { return "codex" }
+
+// PermissionMode is enforced by the CLI flag in Command; the outer Nox runsc
+// container remains the isolation boundary.
+func (Codex) PermissionMode() string { return "danger-full-access" }
 func (Codex) Environment() map[string]string {
 	return map[string]string{"HOME": "/home/nox", "CODEX_HOME": "/home/nox/.codex"}
 }
@@ -41,6 +46,7 @@ type Generic struct{ Cmd string }
 func (g Generic) Name() string                   { return "generic" }
 func (g Generic) Environment() map[string]string { return map[string]string{"HOME": "/home/nox"} }
 func (g Generic) Command() []string              { return []string{"sh", "-lc", g.Cmd} }
+func (g Generic) PermissionMode() string         { return "outer-sandbox" }
 
 func New(config Config) (Adapter, error) {
 	switch config.Name {

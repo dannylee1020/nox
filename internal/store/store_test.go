@@ -1,6 +1,8 @@
 package store
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 )
@@ -27,4 +29,31 @@ func TestMetadataRoundTripPreservesWorkspaceResources(t *testing.T) {
 	if got.WorkspaceVolume != want.WorkspaceVolume || !got.WorkspaceExported || got.CodexVolume != want.CodexVolume {
 		t.Fatalf("workspace resources = %#v", got)
 	}
+}
+
+func TestMetadataWritesAreAtomic(t *testing.T) {
+	st := New(t.TempDir())
+	metadata := Metadata{RunID: "atomic123", State: StateInitializing, StartedAt: time.Now()}
+	if err := st.WriteMetadata(metadata); err != nil {
+		t.Fatal(err)
+	}
+	const writes = 500
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < writes; i++ {
+			metadata.State = State(fmt.Sprintf("state-%d", i))
+			if err := st.WriteMetadata(metadata); err != nil {
+				t.Errorf("write metadata: %v", err)
+				return
+			}
+		}
+	}()
+	for i := 0; i < writes*2; i++ {
+		if _, err := st.ReadMetadata(metadata.RunID); err != nil {
+			t.Fatalf("read metadata during writes: %v", err)
+		}
+	}
+	wg.Wait()
 }

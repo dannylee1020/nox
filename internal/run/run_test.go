@@ -60,6 +60,9 @@ func (f *fakeDockerRunner) Run(_ context.Context, command execx.Command) (execx.
 
 func (f *fakeDockerRunner) Stream(_ context.Context, command execx.Command, stdout, _ io.Writer) (execx.Result, error) {
 	joined := strings.Join(command.Args, " ")
+	if strings.Contains(joined, "git config --global") {
+		return execx.Result{ExitCode: 0}, nil
+	}
 	if strings.Contains(joined, " false") {
 		return execx.Result{ExitCode: 1}, nil
 	}
@@ -158,6 +161,39 @@ func TestLaunchPublishesValidatedLocalBranchAndTearsDown(t *testing.T) {
 	}
 }
 
+func TestLaunchAnnouncesReadableRun(t *testing.T) {
+	source := t.TempDir()
+	initRunFixture(t, source)
+	state := t.TempDir()
+	fake := &fakeDockerRunner{}
+	var announced store.Metadata
+	orchestrator := New()
+	orchestrator.Docker = sandbox.Docker{Runner: fake}
+	result, err := orchestrator.Launch(context.Background(), Config{
+		Repo: source, From: "main", OutputBranch: "nox/announced", Agent: "generic",
+		AgentCommand: "no-op", Task: "announce", Validation: "true",
+		Network: "none", Image: "nox-runner:v0", StateRoot: state, Timeout: time.Minute,
+		Output: io.Discard, ErrorOutput: io.Discard,
+		OnStart: func(metadata store.Metadata) error {
+			announced = metadata
+			got, readErr := store.New(state).ReadMetadata(metadata.RunID)
+			if readErr != nil {
+				return readErr
+			}
+			if got.State != store.StateInitializing {
+				t.Fatalf("announced state = %q", got.State)
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if announced.RunID == "" || result.Metadata.RunID != announced.RunID {
+		t.Fatalf("announced run = %#v, result = %#v", announced, result.Metadata)
+	}
+}
+
 func TestLaunchNoChangesDoesNotPublish(t *testing.T) {
 	source := t.TempDir()
 	initRunFixture(t, source)
@@ -212,6 +248,8 @@ func TestLaunchValidationFailureDoesNotPublish(t *testing.T) {
 func initRunFixture(t *testing.T, dir string) {
 	t.Helper()
 	assertGit(t, dir, "init", "-b", "main")
+	assertGit(t, dir, "config", "user.name", "Fixture User")
+	assertGit(t, dir, "config", "user.email", "fixture@example.com")
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("base\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

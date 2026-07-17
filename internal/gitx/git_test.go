@@ -2,6 +2,7 @@ package gitx
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,22 @@ import (
 
 	"github.com/nox-dev/nox/internal/execx"
 )
+
+type identityRunner struct{}
+
+func (identityRunner) Run(_ context.Context, command execx.Command) (execx.Result, error) {
+	if len(command.Args) >= 3 && command.Args[0] == "config" && command.Args[2] == "user.name" {
+		return execx.Result{Stdout: "Configured User\n"}, nil
+	}
+	return execx.Result{ExitCode: 1}, errors.New("missing Git identity")
+}
+
+func TestIdentityRequiresBothConfiguredValues(t *testing.T) {
+	_, err := (Git{Runner: identityRunner{}}).Identity(context.Background(), t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "configure user.name and user.email") {
+		t.Fatalf("identity error = %v", err)
+	}
+}
 
 func TestCloneAtAndPublishPreserveSourceCheckout(t *testing.T) {
 	ctx := context.Background()
@@ -27,6 +44,8 @@ func TestCloneAtAndPublishPreserveSourceCheckout(t *testing.T) {
 		return strings.TrimSpace(result.Stdout)
 	}
 	gitRun(source, "init", "-b", "main")
+	gitRun(source, "config", "user.name", "Source User")
+	gitRun(source, "config", "user.email", "source@example.com")
 	if err := os.WriteFile(filepath.Join(source, "README.md"), []byte("base\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +84,11 @@ func TestCloneAtAndPublishPreserveSourceCheckout(t *testing.T) {
 		t.Fatal(err)
 	}
 	branch := "nox/test"
-	sha, changed, err := git.Publish(ctx, source, base, branch, workspace, "nox: test changes")
+	identity, err := git.Identity(ctx, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sha, changed, err := git.Publish(ctx, source, base, branch, workspace, "nox: test changes", identity)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,6 +104,9 @@ func TestCloneAtAndPublishPreserveSourceCheckout(t *testing.T) {
 	}
 	if current := gitRun(source, "branch", "--show-current"); current != "main" {
 		t.Fatalf("source checkout moved to %q", current)
+	}
+	if author := gitRun(source, "show", "-s", "--format=%an <%ae>|%cn <%ce>", sha); author != "Source User <source@example.com>|Source User <source@example.com>" {
+		t.Fatalf("commit identity = %q", author)
 	}
 	if _, err := os.Stat(filepath.Join(source, "dirty.txt")); err != nil {
 		t.Fatalf("source dirty file changed: %v", err)
@@ -112,7 +138,11 @@ func TestPublishRejectsExistingBranch(t *testing.T) {
 	if err := git.CloneAt(ctx, source, base, workspace); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := git.Publish(ctx, source, base, "main", workspace, "nox: collision"); err == nil {
+	identity, err := git.Identity(ctx, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := git.Publish(ctx, source, base, "main", workspace, "nox: collision", identity); err == nil {
 		t.Fatal("expected existing branch error")
 	}
 }
@@ -133,6 +163,8 @@ func initFixtureRepo(t *testing.T, dir string) {
 		}
 	}
 	git("init", "-b", "main")
+	git("config", "user.name", "Fixture User")
+	git("config", "user.email", "fixture@example.com")
 	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("base\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

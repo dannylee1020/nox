@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -13,14 +14,22 @@ func TestCodexAdapter(t *testing.T) {
 	if adapter.Name() != "codex" {
 		t.Fatalf("name = %q", adapter.Name())
 	}
-	command := strings.Join(adapter.Command(), " ")
-	for _, want := range []string{"codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--ephemeral"} {
-		if !strings.Contains(command, want) {
-			t.Errorf("command missing %q: %s", want, command)
-		}
+	if adapter.PermissionMode() != "danger-full-access" {
+		t.Fatalf("permission mode = %q", adapter.PermissionMode())
+	}
+	wantCommand := []string{"codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--ephemeral", "-"}
+	if got := adapter.Command(); !reflect.DeepEqual(got, wantCommand) {
+		t.Fatalf("command = %#v, want %#v", got, wantCommand)
 	}
 	if got := adapter.Environment()["CODEX_HOME"]; got != "/home/nox/.codex" {
 		t.Fatalf("CODEX_HOME = %q", got)
+	}
+	generic, err := New(Config{Name: "generic", Command: "true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if generic.PermissionMode() != "outer-sandbox" {
+		t.Fatalf("generic permission mode = %q", generic.PermissionMode())
 	}
 }
 

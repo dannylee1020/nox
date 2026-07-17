@@ -15,8 +15,36 @@ type Git struct {
 	Runner execx.CommandRunner
 }
 
+type Identity struct {
+	Name  string
+	Email string
+}
+
 func (g Git) command(ctx context.Context, dir string, args ...string) (execx.Result, error) {
 	return g.Runner.Run(ctx, execx.Command{Name: "git", Args: args, Dir: dir})
+}
+
+func (g Git) Identity(ctx context.Context, repo string) (Identity, error) {
+	read := func(key string) (string, error) {
+		result, err := g.command(ctx, repo, "config", "--get", key)
+		if err != nil {
+			return "", fmt.Errorf("read Git %s: %w", key, err)
+		}
+		value := strings.TrimSpace(result.Stdout)
+		if value == "" {
+			return "", fmt.Errorf("Git %s is empty", key)
+		}
+		return value, nil
+	}
+	name, err := read("user.name")
+	if err != nil {
+		return Identity{}, fmt.Errorf("Git author identity is unavailable: %w; configure user.name and user.email", err)
+	}
+	email, err := read("user.email")
+	if err != nil {
+		return Identity{}, fmt.Errorf("Git author identity is unavailable: %w; configure user.name and user.email", err)
+	}
+	return Identity{Name: name, Email: email}, nil
 }
 
 func (g Git) RepoRoot(ctx context.Context, path string) (string, error) {
@@ -103,7 +131,7 @@ func (g Git) CommitPatch(ctx context.Context, repo, base, commit string) (string
 	return result.Stdout, nil
 }
 
-func (g Git) Publish(ctx context.Context, sourceRepo, baseSHA, outputBranch, workspace, message string) (sha string, changed bool, err error) {
+func (g Git) Publish(ctx context.Context, sourceRepo, baseSHA, outputBranch, workspace, message string, identity Identity) (sha string, changed bool, err error) {
 	if err := g.ValidateBranch(ctx, sourceRepo, outputBranch); err != nil {
 		return "", false, err
 	}
@@ -146,10 +174,10 @@ func (g Git) Publish(ctx context.Context, sourceRepo, baseSHA, outputBranch, wor
 	}
 
 	commitEnv := execx.WithEnv(os.Environ(), map[string]string{
-		"GIT_AUTHOR_NAME":     "Nox",
-		"GIT_AUTHOR_EMAIL":    "nox@localhost",
-		"GIT_COMMITTER_NAME":  "Nox",
-		"GIT_COMMITTER_EMAIL": "nox@localhost",
+		"GIT_AUTHOR_NAME":     identity.Name,
+		"GIT_AUTHOR_EMAIL":    identity.Email,
+		"GIT_COMMITTER_NAME":  identity.Name,
+		"GIT_COMMITTER_EMAIL": identity.Email,
 	})
 	_, err = g.Runner.Run(ctx, execx.Command{
 		Name: "git",

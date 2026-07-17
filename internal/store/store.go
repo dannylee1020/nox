@@ -31,6 +31,8 @@ type Metadata struct {
 	OutputBranch      string    `json:"outputBranch"`
 	ResultSHA         string    `json:"resultSha,omitempty"`
 	Agent             string    `json:"agent"`
+	AgentPermissions  string    `json:"agentPermissions,omitempty"`
+	CommitAuthor      string    `json:"commitAuthor,omitempty"`
 	Validation        string    `json:"validation"`
 	Network           string    `json:"network"`
 	Image             string    `json:"image"`
@@ -74,7 +76,28 @@ func (s Store) WriteMetadata(metadata Metadata) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "metadata.json"), append(data, '\n'), 0o600)
+	temporary, err := os.CreateTemp(dir, ".metadata-*.tmp")
+	if err != nil {
+		return err
+	}
+	temporaryName := temporary.Name()
+	defer os.Remove(temporaryName)
+	if err := temporary.Chmod(0o600); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if _, err := temporary.Write(append(data, '\n')); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporaryName, filepath.Join(dir, "metadata.json"))
 }
 
 func (s Store) ReadMetadata(id string) (Metadata, error) {
