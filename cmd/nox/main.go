@@ -198,7 +198,7 @@ func cleanup(args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("removed %d managed container(s)\n", count)
+		fmt.Printf("removed %d managed resource(s)\n", count)
 		return nil
 	}
 	if len(fs.Args()) != 1 {
@@ -208,13 +208,26 @@ func cleanup(args []string) error {
 	if err != nil {
 		return err
 	}
-	if metadata, readErr := st.ReadMetadata(fs.Arg(0)); readErr == nil && metadata.ContainerID != "" {
+	metadata, readErr := st.ReadMetadata(fs.Arg(0))
+	if readErr == nil {
+		docker := sandbox.Docker{Runner: execx.Runner{}}
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-		removeErr := (sandbox.Docker{Runner: execx.Runner{}}).Remove(ctx, sandbox.Container{ID: metadata.ContainerID})
-		cancel()
-		if removeErr != nil {
-			return removeErr
+		if metadata.ContainerID != "" {
+			if removeErr := docker.Remove(ctx, sandbox.Container{ID: metadata.ContainerID}); removeErr != nil {
+				cancel()
+				return removeErr
+			}
 		}
+		for _, volume := range []string{metadata.WorkspaceVolume, metadata.CodexVolume} {
+			if volume == "" {
+				continue
+			}
+			if removeErr := docker.RemoveVolume(ctx, volume); removeErr != nil {
+				cancel()
+				return removeErr
+			}
+		}
+		cancel()
 	}
 	if err := st.RemoveRun(fs.Arg(0)); err != nil {
 		return err

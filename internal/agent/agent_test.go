@@ -14,7 +14,7 @@ func TestCodexAdapter(t *testing.T) {
 		t.Fatalf("name = %q", adapter.Name())
 	}
 	command := strings.Join(adapter.Command(), " ")
-	for _, want := range []string{"codex", "exec", "--full-auto", "--sandbox danger-full-access", "--ephemeral"} {
+	for _, want := range []string{"codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--ephemeral"} {
 		if !strings.Contains(command, want) {
 			t.Errorf("command missing %q: %s", want, command)
 		}

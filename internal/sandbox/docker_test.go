@@ -22,6 +22,9 @@ func (f *fakeRunner) Run(_ context.Context, command execx.Command) (execx.Result
 	if len(command.Args) > 0 && command.Args[0] == "create" {
 		result.Stdout = "container-id\n"
 	}
+	if len(command.Args) > 1 && command.Args[0] == "volume" && command.Args[1] == "create" {
+		result.Stdout = "volume-id\n"
+	}
 	if len(command.Args) > 0 && command.Args[0] == "ps" {
 		result.Stdout = "old-container\n"
 	}
@@ -33,12 +36,29 @@ func (f *fakeRunner) Stream(_ context.Context, command execx.Command, _ io.Write
 	return execx.Result{ExitCode: 0}, nil
 }
 
+func TestCreateWorkspaceVolumeUsesManagedLabels(t *testing.T) {
+	fake := &fakeRunner{}
+	volume, err := (Docker{Runner: fake}).CreateWorkspaceVolume(context.Background(), "abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if volume != "volume-id" {
+		t.Fatalf("volume = %q", volume)
+	}
+	args := strings.Join(fake.commands[0].Args, " ")
+	for _, want := range []string{"volume create", "io.nox.managed=true", "io.nox.run-id=abc123", "io.nox.kind=workspace", "nox-abc123-workspace"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("volume command missing %q: %s", want, args)
+		}
+	}
+}
+
 func TestCreateUsesRunscAndMinimumGuardrails(t *testing.T) {
 	fake := &fakeRunner{}
 	docker := Docker{Runner: fake}
 	container, err := docker.Create(context.Background(), Config{
-		Image: "nox-runner:v0", Workspace: "/tmp/workspace", RunID: "abc123", Network: "online",
-		CPU: "2", Memory: "4g", PIDs: 256, CodexHome: "/tmp/codex",
+		Image: "nox-runner:v0", WorkspaceVolume: "nox-abc123-workspace", RunID: "abc123", Network: "online",
+		CPU: "2", Memory: "4g", PIDs: 256, CodexHomeVolume: "nox-abc123-codex",
 		Environment: map[string]string{"HOME": "/home/nox", "CODEX_HOME": "/home/nox/.codex"},
 	})
 	if err != nil {
@@ -54,7 +74,7 @@ func TestCreateUsesRunscAndMinimumGuardrails(t *testing.T) {
 	for _, want := range []string{
 		"create", "--runtime runsc", "--user 1000:1000", "--cap-drop ALL",
 		"--security-opt no-new-privileges:true", "--network bridge", "--pids-limit 256",
-		"type=bind,src=/tmp/workspace,dst=/workspace", "type=bind,src=/tmp/codex,dst=/home/nox/.codex,readonly",
+		"type=volume,src=nox-abc123-workspace,dst=/workspace", "type=volume,src=nox-abc123-codex,dst=/home/nox/.codex-ro,readonly",
 		"--tmpfs /tmp:rw,noexec,nosuid,size=256m", "--tmpfs /var/tmp:rw,exec,nosuid,size=512m",
 	} {
 		if !strings.Contains(args, want) {

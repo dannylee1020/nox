@@ -125,11 +125,40 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 		Agent: adapter.Name(), Validation: config.Validation, Network: config.Network,
 		Image: config.Image, State: store.StateInitializing, StartedAt: time.Now(), Workspace: workspace,
 	}
+	var workspaceVolume string
+	var codexVolume string
+	var workspaceExported bool
+	exportWorkspace := func() error {
+		if workspaceVolume == "" || workspaceExported {
+			return nil
+		}
+		exportCtx, exportCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer exportCancel()
+		temporaryWorkspace := workspace + ".exporting"
+		if err := o.Docker.ExportWorkspace(exportCtx, workspaceVolume, config.Image, id, temporaryWorkspace); err != nil {
+			return err
+		}
+		if err := os.RemoveAll(workspace); err != nil {
+			return fmt.Errorf("replace host workspace: %w", err)
+		}
+		if err := os.Rename(temporaryWorkspace, workspace); err != nil {
+			return fmt.Errorf("install exported workspace: %w", err)
+		}
+		metadata.WorkspaceExported = true
+		_ = o.Store.WriteMetadata(metadata)
+		workspaceExported = true
+		return nil
+	}
 	writeState := func(state store.State) {
 		metadata.State = state
 		_ = o.Store.WriteMetadata(metadata)
 	}
 	fail := func(failErr error) (Result, error) {
+		if workspaceVolume != "" && !workspaceExported {
+			if exportErr := exportWorkspace(); exportErr != nil {
+				failErr = fmt.Errorf("%w; export workspace: %v", failErr, exportErr)
+			}
+		}
 		if IsCancelled(failErr) {
 			metadata.State = store.StateCancelled
 		} else {
@@ -183,10 +212,72 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 		}
 	}
 
+	workspaceVolume, err = o.Docker.CreateWorkspaceVolume(ctx, id)
+	if err != nil {
+		return fail(err)
+	}
+	metadata.WorkspaceVolume = workspaceVolume
+	_ = o.Store.WriteMetadata(metadata)
+
+	// Teardown runs on every path after the workspace volume is created.
+	var container sandbox.Container
+	defer func() {
+		terminalState := metadata.State
+		metadata.State = store.StateTeardown
+		_ = o.Store.WriteMetadata(metadata)
+		teardownCtx, teardownCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer teardownCancel()
+		if container.ID != "" {
+			if removeErr := o.Docker.Remove(teardownCtx, container); removeErr != nil {
+				if err == nil {
+					err = removeErr
+					terminalState = store.StateFailed
+					metadata.Retained = true
+				}
+				metadata.Error = appendError(metadata.Error, removeErr)
+			}
+		}
+		if removeErr := o.Docker.RemoveVolume(teardownCtx, workspaceVolume); removeErr != nil {
+			if err == nil {
+				err = removeErr
+				terminalState = store.StateFailed
+				metadata.Retained = true
+			}
+			metadata.Error = appendError(metadata.Error, removeErr)
+		}
+		if codexVolume != "" {
+			if removeErr := o.Docker.RemoveVolume(teardownCtx, codexVolume); removeErr != nil {
+				if err == nil {
+					err = removeErr
+					terminalState = store.StateFailed
+					metadata.Retained = true
+				}
+				metadata.Error = appendError(metadata.Error, removeErr)
+			}
+		}
+		metadata.State = terminalState
+		_ = o.Store.WriteMetadata(metadata)
+		result.Metadata = metadata
+	}()
+	if err := o.Docker.SeedWorkspace(ctx, workspaceVolume, workspace, config.Image, id); err != nil {
+		return fail(err)
+	}
+	if adapter.Name() == "codex" {
+		codexVolume, err = o.Docker.CreateCodexVolume(ctx, id)
+		if err != nil {
+			return fail(err)
+		}
+		metadata.CodexVolume = codexVolume
+		_ = o.Store.WriteMetadata(metadata)
+		if err := o.Docker.SeedCodexHome(ctx, codexVolume, codexHome, config.Image, id); err != nil {
+			return fail(err)
+		}
+	}
+
 	// create the isolated runsc container.
-	container, err := o.Docker.Create(ctx, sandbox.Config{
-		Image: config.Image, Workspace: workspace, RunID: id, Network: config.Network,
-		CPU: config.CPU, Memory: config.Memory, PIDs: config.PIDs, CodexHome: codexHome,
+	container, err = o.Docker.Create(ctx, sandbox.Config{
+		Image: config.Image, WorkspaceVolume: workspaceVolume, CodexHomeVolume: codexVolume,
+		RunID: id, Network: config.Network, CPU: config.CPU, Memory: config.Memory, PIDs: config.PIDs,
 		Environment: adapter.Environment(),
 	})
 	if err != nil {
@@ -194,23 +285,13 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 	}
 	metadata.ContainerID = container.ID
 	writeState(store.StateStarting)
-	// Teardown runs on every path after the container is created.
-	defer func() {
-		terminalState := metadata.State
-		metadata.State = store.StateTeardown
-		_ = o.Store.WriteMetadata(metadata)
-		removeErr := o.Docker.Remove(context.Background(), container)
-		if removeErr != nil && err == nil {
-			err = removeErr
-			metadata.Error = removeErr.Error()
-			terminalState = store.StateFailed
-			metadata.Retained = true
-		}
-		metadata.State = terminalState
-		_ = o.Store.WriteMetadata(metadata)
-	}()
 	if err := o.Docker.Start(ctx, container); err != nil {
 		return fail(err)
+	}
+	if codexVolume != "" {
+		if err := o.Docker.PrepareCodexHome(ctx, container); err != nil {
+			return fail(err)
+		}
 	}
 
 	// run the selected agent inside the sandbox.
@@ -245,6 +326,10 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 			validationErr = fmt.Errorf("validation exited with code %d", validationResult.ExitCode)
 		}
 		return fail(validationErr)
+	}
+
+	if err := exportWorkspace(); err != nil {
+		return fail(err)
 	}
 
 	// publish only validated changes as a local host-side branch.
@@ -295,4 +380,11 @@ func summarizeTask(task string) string {
 
 func IsCancelled(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+func appendError(existing string, err error) string {
+	if existing == "" {
+		return err.Error()
+	}
+	return existing + "; " + err.Error()
 }

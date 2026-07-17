@@ -7,7 +7,9 @@ RUN apt-get update \
     && npm install --global "${CODEX_PACKAGE}" \
     && rm -rf /var/lib/apt/lists/* /root/.npm
 
-RUN useradd --create-home --uid 1000 --shell /bin/bash nox \
+# The Node base image already provides UID/GID 1000 as `node`.
+RUN groupmod --new-name nox node \
+    && usermod --login nox --home /home/nox --move-home node \
     && mkdir -p /workspace /home/nox/.codex \
     && chown -R nox:nox /workspace /home/nox
 
@@ -15,5 +17,4 @@ USER nox
 WORKDIR /workspace
 ENV HOME=/home/nox
 ENV CODEX_HOME=/home/nox/.codex
-
 CMD ["sleep", "infinity"]

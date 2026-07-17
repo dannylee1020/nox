@@ -15,9 +15,9 @@ import (
 )
 
 type fakeDockerRunner struct {
-	workspace string
-	removed   bool
-	agentDone bool
+	volumePath string
+	removed    bool
+	agentDone  bool
 }
 
 func (f *fakeDockerRunner) Run(_ context.Context, command execx.Command) (execx.Result, error) {
@@ -25,13 +25,33 @@ func (f *fakeDockerRunner) Run(_ context.Context, command execx.Command) (execx.
 		return execx.Result{ExitCode: 1}, nil
 	}
 	switch command.Args[0] {
-	case "create":
-		for _, arg := range command.Args {
-			if strings.HasPrefix(arg, "type=bind,src=") && strings.HasSuffix(arg, ",dst=/workspace") {
-				f.workspace = strings.TrimSuffix(strings.TrimPrefix(arg, "type=bind,src="), ",dst=/workspace")
+	case "volume":
+		if len(command.Args) > 1 && command.Args[1] == "create" {
+			var err error
+			f.volumePath, err = os.MkdirTemp("", "nox-fake-volume-")
+			if err != nil {
+				return execx.Result{ExitCode: 1}, err
 			}
+			return execx.Result{Stdout: "fake-volume\n", ExitCode: 0}, nil
 		}
+		if len(command.Args) > 1 && command.Args[1] == "rm" {
+			_ = os.RemoveAll(f.volumePath)
+			return execx.Result{ExitCode: 0}, nil
+		}
+	case "create":
 		return execx.Result{Stdout: "fake-container\n", ExitCode: 0}, nil
+	case "cp":
+		if len(command.Args) != 3 {
+			return execx.Result{ExitCode: 1}, nil
+		}
+		source, destination := command.Args[1], command.Args[2]
+		if strings.HasPrefix(source, "fake-container:/workspace/") {
+			return execx.Result{ExitCode: 0}, copyWorkspace(f.volumePath, destination)
+		}
+		if strings.HasPrefix(destination, "fake-container:/workspace") {
+			source = strings.TrimSuffix(source, string(filepath.Separator)+".")
+			return execx.Result{ExitCode: 0}, copyWorkspace(source, f.volumePath)
+		}
 	case "rm":
 		f.removed = true
 	}
@@ -48,22 +68,56 @@ func (f *fakeDockerRunner) Stream(_ context.Context, command execx.Command, stdo
 		if strings.Contains(joined, "no-op") {
 			return execx.Result{ExitCode: 0}, nil
 		}
-		if err := os.WriteFile(filepath.Join(f.workspace, "generated.txt"), []byte("generated\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(f.volumePath, "generated.txt"), []byte("generated\n"), 0o644); err != nil {
 			return execx.Result{ExitCode: 1}, err
 		}
 	} else if strings.Contains(joined, "test -f generated.txt") {
-		if _, err := os.Stat(filepath.Join(f.workspace, "generated.txt")); err != nil {
+		if _, err := os.Stat(filepath.Join(f.volumePath, "generated.txt")); err != nil {
 			return execx.Result{ExitCode: 1}, nil
 		}
 	} else if strings.Contains(joined, "sh -lc true") {
 		// No-op validation.
 	} else if strings.Contains(joined, "sh -lc") {
-		if err := os.WriteFile(filepath.Join(f.workspace, "generated.txt"), []byte("generated\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(f.volumePath, "generated.txt"), []byte("generated\n"), 0o644); err != nil {
 			return execx.Result{ExitCode: 1}, err
 		}
 	}
 	_, _ = io.WriteString(stdout, "ok\n")
 	return execx.Result{ExitCode: 0}, nil
+}
+
+func copyWorkspace(source, destination string) error {
+	if err := os.MkdirAll(destination, 0o700); err != nil {
+		return err
+	}
+	return filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		target := filepath.Join(destination, rel)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o700)
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			link, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(link, target)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
 }
 
 func TestLaunchPublishesValidatedLocalBranchAndTearsDown(t *testing.T) {
@@ -90,6 +144,9 @@ func TestLaunchPublishesValidatedLocalBranchAndTearsDown(t *testing.T) {
 	}
 	if result.Metadata.State != store.StateCompleted {
 		t.Fatalf("state = %q", result.Metadata.State)
+	}
+	if result.Metadata.WorkspaceVolume == "" {
+		t.Fatal("workspace volume was not recorded")
 	}
 	if _, err := os.Stat(filepath.Join(result.Metadata.Workspace, "generated.txt")); !os.IsNotExist(err) {
 		t.Fatalf("successful workspace was retained: %v", err)

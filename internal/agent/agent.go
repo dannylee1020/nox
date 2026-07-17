@@ -33,7 +33,7 @@ func (Codex) Environment() map[string]string {
 	return map[string]string{"HOME": "/home/nox", "CODEX_HOME": "/home/nox/.codex"}
 }
 func (Codex) Command() []string {
-	return []string{"codex", "exec", "--full-auto", "--sandbox", "danger-full-access", "--ephemeral", "-"}
+	return []string{"codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--ephemeral", "-"}
 }
 
 type Generic struct{ Cmd string }

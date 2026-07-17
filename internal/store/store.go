@@ -24,26 +24,29 @@ const (
 )
 
 type Metadata struct {
-	RunID          string    `json:"runId"`
-	Repo           string    `json:"repo"`
-	From           string    `json:"from"`
-	BaseSHA        string    `json:"baseSha"`
-	OutputBranch   string    `json:"outputBranch"`
-	ResultSHA      string    `json:"resultSha,omitempty"`
-	Agent          string    `json:"agent"`
-	Validation     string    `json:"validation"`
-	Network        string    `json:"network"`
-	Image          string    `json:"image"`
-	ContainerID    string    `json:"containerId,omitempty"`
-	State          State     `json:"state"`
-	ExitCode       int       `json:"exitCode,omitempty"`
-	ValidationCode int       `json:"validationCode,omitempty"`
-	Error          string    `json:"error,omitempty"`
-	Warning        string    `json:"warning,omitempty"`
-	StartedAt      time.Time `json:"startedAt"`
-	CompletedAt    time.Time `json:"completedAt,omitempty"`
-	Workspace      string    `json:"workspace"`
-	Retained       bool      `json:"retained"`
+	RunID             string    `json:"runId"`
+	Repo              string    `json:"repo"`
+	From              string    `json:"from"`
+	BaseSHA           string    `json:"baseSha"`
+	OutputBranch      string    `json:"outputBranch"`
+	ResultSHA         string    `json:"resultSha,omitempty"`
+	Agent             string    `json:"agent"`
+	Validation        string    `json:"validation"`
+	Network           string    `json:"network"`
+	Image             string    `json:"image"`
+	ContainerID       string    `json:"containerId,omitempty"`
+	State             State     `json:"state"`
+	ExitCode          int       `json:"exitCode,omitempty"`
+	ValidationCode    int       `json:"validationCode,omitempty"`
+	Error             string    `json:"error,omitempty"`
+	Warning           string    `json:"warning,omitempty"`
+	StartedAt         time.Time `json:"startedAt"`
+	CompletedAt       time.Time `json:"completedAt,omitempty"`
+	Workspace         string    `json:"workspace"`
+	WorkspaceVolume   string    `json:"workspaceVolume,omitempty"`
+	WorkspaceExported bool      `json:"workspaceExported"`
+	CodexVolume       string    `json:"codexVolume,omitempty"`
+	Retained          bool      `json:"retained"`
 }
 
 type Store struct {
