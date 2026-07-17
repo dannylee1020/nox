@@ -30,7 +30,13 @@ func TestCloneAtAndPublishPreserveSourceCheckout(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, "README.md"), []byte("base\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(source, "add", "README.md")
+	if err := os.WriteFile(filepath.Join(source, "remove.txt"), []byte("remove\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "mode.sh"), []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(source, "add", "README.md", "remove.txt", "mode.sh")
 	gitRun(source, "commit", "-m", "base")
 	base := gitRun(source, "rev-parse", "HEAD")
 	if err := os.WriteFile(filepath.Join(source, "dirty.txt"), []byte("do not copy\n"), 0o644); err != nil {
@@ -44,6 +50,15 @@ func TestCloneAtAndPublishPreserveSourceCheckout(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(workspace, "new.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, ".hidden"), []byte("hidden\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(workspace, "remove.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(workspace, "mode.sh"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink("README.md", filepath.Join(workspace, "link.txt")); err != nil {
@@ -70,8 +85,14 @@ func TestCloneAtAndPublishPreserveSourceCheckout(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(source, "dirty.txt")); err != nil {
 		t.Fatalf("source dirty file changed: %v", err)
 	}
-	if tree := gitRun(source, "ls-tree", "-r", "--name-only", sha); !strings.Contains(tree, "new.txt") || !strings.Contains(tree, "link.txt") {
+	if tree := gitRun(source, "ls-tree", "-r", "--name-only", sha); !strings.Contains(tree, "new.txt") || !strings.Contains(tree, ".hidden") || !strings.Contains(tree, "link.txt") {
 		t.Fatalf("published tree missing files: %s", tree)
+	}
+	if tree := gitRun(source, "ls-tree", "-r", "--name-only", sha); strings.Contains(tree, "remove.txt") {
+		t.Fatal("deleted file leaked into published tree")
+	}
+	if mode := gitRun(source, "ls-tree", sha, "mode.sh"); !strings.HasPrefix(mode, "100755 ") {
+		t.Fatalf("mode.sh mode = %q, want executable", mode)
 	}
 	if tree := gitRun(source, "ls-tree", "-r", "--name-only", sha); strings.Contains(tree, "dirty.txt") {
 		t.Fatal("dirty source file leaked into published tree")
@@ -115,6 +136,12 @@ func initFixtureRepo(t *testing.T, dir string) {
 	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("base\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	git("add", "file.txt")
+	if err := os.WriteFile(filepath.Join(dir, "remove.txt"), []byte("remove\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "mode.sh"), []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "file.txt", "remove.txt", "mode.sh")
 	git("commit", "-m", "base")
 }

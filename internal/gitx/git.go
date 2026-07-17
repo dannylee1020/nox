@@ -127,6 +127,9 @@ func (g Git) Publish(ctx context.Context, sourceRepo, baseSHA, outputBranch, wor
 	if _, err := g.command(ctx, publishDir, "clean", "-fdx"); err != nil {
 		return "", false, fmt.Errorf("clean publish tree: %w", err)
 	}
+	if err := clearWorkingTree(publishDir); err != nil {
+		return "", false, fmt.Errorf("clear publish tree: %w", err)
+	}
 	if err := copyTree(workspace, publishDir); err != nil {
 		return "", false, fmt.Errorf("copy sandbox changes: %w", err)
 	}
@@ -175,6 +178,22 @@ func (g Git) Publish(ctx context.Context, sourceRepo, baseSHA, outputBranch, wor
 	return sha, true, nil
 }
 
+func clearWorkingTree(root string) error {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.Name() == ".git" {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(root, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func copyTree(source, destination string) error {
 	return filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -187,35 +206,62 @@ func copyTree(source, destination string) error {
 		if rel == "." {
 			return nil
 		}
-		if rel == ".git" || strings.HasPrefix(rel, ".git"+string(filepath.Separator)) {
+		if containsGitPath(rel) {
 			if entry.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 		target := filepath.Join(destination, rel)
+		if err := removeTarget(target); err != nil {
+			return err
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			link, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(link, target)
+		}
 		info, err := entry.Info()
 		if err != nil {
 			return err
 		}
 		switch {
 		case entry.IsDir():
-			return os.MkdirAll(target, info.Mode().Perm())
-		case entry.Type()&os.ModeSymlink != 0:
-			link, err := os.Readlink(path)
-			if err != nil {
+			if err := os.MkdirAll(target, info.Mode().Perm()); err != nil {
 				return err
 			}
-			if err := os.RemoveAll(target); err != nil {
-				return err
-			}
-			return os.Symlink(link, target)
+			return os.Chmod(target, info.Mode().Perm())
 		case info.Mode().IsRegular():
 			return copyFile(path, target, info.Mode().Perm())
 		default:
 			return fmt.Errorf("unsupported special file in sandbox: %s", rel)
 		}
 	})
+}
+
+func containsGitPath(path string) bool {
+	for _, part := range strings.Split(path, string(filepath.Separator)) {
+		if part == ".git" {
+			return true
+		}
+	}
+	return false
+}
+
+func removeTarget(path string) error {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
+		return os.RemoveAll(path)
+	}
+	return os.Remove(path)
 }
 
 func copyFile(source, destination string, mode os.FileMode) error {
@@ -236,5 +282,8 @@ func copyFile(source, destination string, mode os.FileMode) error {
 	if copyErr != nil {
 		return copyErr
 	}
-	return closeErr
+	if closeErr != nil {
+		return closeErr
+	}
+	return os.Chmod(destination, mode)
 }
