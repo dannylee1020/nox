@@ -17,26 +17,26 @@ local Git ref
 
 ## Install
 
-Nox v0 has no release artifacts, so the curl installer downloads the source and builds it locally. It requires `curl`, `tar`, and the Go version declared in `go.mod`.
+Nox v0 installs everything needed for local Codex execution with one command:
 
-Install the CLI to `~/.local/bin/nox`:
+- the Nox CLI under `~/.local/bin/nox`
+- the Codex skill under `~/.agents/skills/nox`
+- the local Docker/gVisor sandbox and `nox-runner:v0` image
+- Colima and the Docker CLI on macOS when they are missing
+
+The installer downloads the source and builds it locally, so `curl`, `tar`, Go, and Git are required. On macOS, install Homebrew first; Nox provisions Colima, Docker, and `runsc`. On Linux, Docker must already be installed with `runsc` registered.
+
+Run:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/nox-dev/nox/main/install.sh | bash
 ```
 
-Install the CLI and local sandbox in one step:
+Add `~/.local/bin` to `PATH` if needed. Restart Codex after installation so it discovers the skill, then explicitly invoke it with `$nox`.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/nox-dev/nox/main/install.sh | bash -s -- --local
-```
+The skill delegates to the installed `nox` CLI; it does not add another sandbox or daemon. It only runs when explicitly invoked as `$nox`.
 
-Add `~/.local/bin` to `PATH` if needed.
-
-`--local` requires Git and:
-
-- **macOS:** Homebrew. The installer adds the Docker CLI and Colima if missing, creates the `nox` Colima profile, installs `runsc`, builds `nox-runner:v0`, selects the `colima-nox` Docker context, and runs `nox doctor`. Switch back later with `docker context use <name>`.
-- **Linux:** Docker with `runsc` already registered. The installer validates the runtime, builds `nox-runner:v0`, and runs `nox doctor`; it does not modify the host Docker installation.
+The installer always prepares and verifies the local backend. On macOS it installs Colima and the Docker CLI when needed, creates or reuses the `nox` Colima profile, installs `runsc`, and selects the `colima-nox` Docker context. On Linux it validates the existing Docker/runsc setup. Both paths build the runner image and finish with `nox doctor`.
 
 On Linux, install Docker and follow the [gVisor installation guide](https://gvisor.dev/docs/user_guide/install/), then register and verify `runsc`:
 
@@ -46,19 +46,19 @@ sudo systemctl restart docker
 docker info --format '{{json .Runtimes}}'
 ```
 
-A successful local install ends with:
+A successful install ends with:
 
 ```text
 ok: Docker can run nox-runner:v0 with runsc
 ```
 
-You can also run `./install.sh` from a checkout; without `--local`, this only requires Go. Common overrides:
+You can also run `./install.sh` from a checkout. Common local VM overrides:
 
 ```bash
 NOX_COLIMA_CPUS=4 \
 NOX_COLIMA_MEMORY=8 \
 NOX_COLIMA_DISK=40 \
-./install.sh --local
+./install.sh
 ```
 
 Run `./install.sh --help` for custom prefixes, Colima profiles, image tags, and gVisor releases. A custom image must also be passed to `nox launch --image <tag>`.
@@ -104,6 +104,12 @@ nox launch \
 ```
 
 Nox stages `~/.codex` into a read-only per-run volume and gives Codex a disposable writable home. Select another host directory with `--codex-home /path/to/codex-home`.
+
+After installing the skill, use Codex directly:
+
+```text
+$nox Implement the requested change and validate it with go test ./...
+```
 
 `nox launch` defaults to `--network online`, which most hosted agents require. Use `--network none` for offline runs.
 

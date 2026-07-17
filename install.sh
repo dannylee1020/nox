@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Install Nox from a checkout or source archive. The default installs only
-# the CLI; --local also prepares the local Docker/gVisor backend.
+# Install Nox from a checkout or source archive, including the local
+# Docker/gVisor backend and Codex skill.
 
 SOURCE_DIR=""
 SOURCE_TEMP=""
 BUILD_BINARY=""
 TEMP_BINARY=""
+SKILL_TEMP=""
+SKILL_BACKUP=""
 SOURCE_REPO="${NOX_SOURCE_REPO:-https://github.com/nox-dev/nox}"
 SOURCE_REF="${NOX_SOURCE_REF:-main}"
 SOURCE_ARCHIVE_URL="${NOX_SOURCE_ARCHIVE_URL:-}"
@@ -30,34 +32,33 @@ COLIMA_CPUS="${NOX_COLIMA_CPUS:-4}"
 COLIMA_MEMORY="${NOX_COLIMA_MEMORY:-8}"
 COLIMA_DISK="${NOX_COLIMA_DISK:-40}"
 COLIMA_VM_TYPE="${NOX_COLIMA_VM_TYPE:-vz}"
-LOCAL=0
+CODEX_SKILLS_DIR="${NOX_CODEX_SKILLS_DIR:-${HOME}/.agents/skills}"
 
 usage() {
 	cat <<'EOF'
 Usage: install.sh [options]
 
-Install the Nox CLI from this checkout or a downloaded source archive.
-By default, only the CLI is built.
+Install the Nox CLI, local Docker/gVisor backend, and Codex skill from this checkout or a downloaded source archive.
 
 Options:
-  --local                  also prepare the local Docker/gVisor backend
   --prefix PATH            install the binary under PATH
   --image IMAGE            runner image tag to build and validate
-  --profile NAME           Colima profile name (macOS --local only)
+  --profile NAME           Colima profile name
   --gvisor-version VALUE   gVisor release path, default: latest
+  --codex-skills-dir PATH  Codex skill root, default: ~/.agents/skills
   -h, --help               show this help
 
 Environment overrides:
   NOX_PREFIX, NOX_RUNNER_IMAGE, NOX_COLIMA_PROFILE
   NOX_SOURCE_REPO, NOX_SOURCE_REF, NOX_SOURCE_ARCHIVE_URL
   NOX_GVISOR_VERSION, NOX_GVISOR_FORCE_INSTALL
+  NOX_CODEX_SKILLS_DIR
   NOX_COLIMA_CPUS, NOX_COLIMA_MEMORY, NOX_COLIMA_DISK
   NOX_COLIMA_VM_TYPE
 
 Examples:
   curl -fsSL https://raw.githubusercontent.com/nox-dev/nox/main/install.sh | bash
-  curl -fsSL https://raw.githubusercontent.com/nox-dev/nox/main/install.sh | bash -s -- --local
-  ./install.sh --local --prefix "$HOME/.local/bin"
+  ./install.sh --prefix "$HOME/.local/bin"
 EOF
 }
 
@@ -90,6 +91,12 @@ cleanup() {
 	fi
 	if [ -n "$TEMP_BINARY" ]; then
 		rm -f "$TEMP_BINARY"
+	fi
+	if [ -n "$SKILL_TEMP" ]; then
+		rm -rf "$SKILL_TEMP"
+	fi
+	if [ -n "$SKILL_BACKUP" ]; then
+		rm -rf "$SKILL_BACKUP"
 	fi
 	cleanup_source
 }
@@ -240,11 +247,11 @@ prepare_local_backend() {
 			die "Docker daemon is not reachable"
 		fi
 		if ! docker info --format '{{json .Runtimes}}' | grep -q '"runsc"'; then
-			die "Docker does not expose runsc; install and register gVisor before using --local"
+			die "Docker does not expose runsc; install and register gVisor before using Nox"
 		fi
 		;;
 	*)
-		die "--local supports macOS with Colima or Linux with Docker"
+		die "the local backend supports macOS with Colima or Linux with Docker"
 		;;
 	esac
 }
@@ -268,6 +275,66 @@ install_cli() {
 	log "installed $PREFIX/nox"
 }
 
+preflight_codex_skill() {
+	local source="$SOURCE_DIR/skills"
+	local target="$CODEX_SKILLS_DIR/nox"
+	[ -d "$source" ] || die "Nox Codex skill assets are missing from $SOURCE_DIR"
+	[ -f "$source/SKILL.md" ] || die "Nox Codex skill is missing SKILL.md"
+	[ -f "$source/references/cli.md" ] || die "Nox Codex skill is missing its CLI reference"
+	if [ -e "$target" ] || [ -L "$target" ]; then
+		[ -d "$target" ] && [ -f "$target/.nox-skill" ] && \
+			grep -q '^format=1$' "$target/.nox-skill" || \
+			die "refusing to overwrite user-managed Codex skill at $target"
+	fi
+}
+
+install_codex_skill() {
+	local source="$SOURCE_DIR/skills"
+	local target="$CODEX_SKILLS_DIR/nox"
+	local binary="$PREFIX/nox"
+	preflight_codex_skill
+	mkdir -p "$CODEX_SKILLS_DIR"
+
+	SKILL_TEMP="$CODEX_SKILLS_DIR/.nox.tmp.$$"
+	rm -rf "$SKILL_TEMP"
+	mkdir -p "$SKILL_TEMP"
+	cp -R "$source/." "$SKILL_TEMP/"
+	rm -f "$SKILL_TEMP/references/installation.md" "$SKILL_TEMP/references/installation.md.tmpl"
+
+	local escaped_binary="$binary"
+	escaped_binary="${escaped_binary//\\/\\\\}"
+	escaped_binary="${escaped_binary//&/\\&}"
+	escaped_binary="${escaped_binary//|/\\|}"
+	sed "s|__NOX_BINARY__|$escaped_binary|g" \
+		"$source/references/installation.md.tmpl" > "$SKILL_TEMP/references/installation.md"
+	printf 'format=1\nsource_ref=%s\nbinary=%s\n' "$SOURCE_REF" "$binary" > "$SKILL_TEMP/.nox-skill"
+	chmod 0755 "$SKILL_TEMP" "$SKILL_TEMP/references" "$SKILL_TEMP/agents"
+	chmod 0644 "$SKILL_TEMP/SKILL.md" "$SKILL_TEMP/agents/openai.yaml" \
+		"$SKILL_TEMP/references/cli.md" "$SKILL_TEMP/references/installation.md" \
+		"$SKILL_TEMP/.nox-skill"
+	grep -q '^name: nox$' "$SKILL_TEMP/SKILL.md" || die "invalid installed Nox skill metadata"
+	grep -Fq -- "$binary" "$SKILL_TEMP/references/installation.md" || \
+		die "installed Nox skill does not reference $binary"
+
+	if [ -e "$target" ] || [ -L "$target" ]; then
+		SKILL_BACKUP="$CODEX_SKILLS_DIR/.nox.backup.$$"
+		mv "$target" "$SKILL_BACKUP"
+	fi
+	if ! mv "$SKILL_TEMP" "$target"; then
+		if [ -n "$SKILL_BACKUP" ]; then
+			mv "$SKILL_BACKUP" "$target"
+			SKILL_BACKUP=""
+		fi
+		die "install Nox Codex skill at $target"
+	fi
+	SKILL_TEMP=""
+	if [ -n "$SKILL_BACKUP" ]; then
+		rm -rf "$SKILL_BACKUP"
+		SKILL_BACKUP=""
+	fi
+	log "installed Nox skill at $target"
+}
+
 build_runner_image() {
 	require_command docker
 	log "building runner image $IMAGE"
@@ -276,10 +343,6 @@ build_runner_image() {
 
 while (($# > 0)); do
 	case "$1" in
-	--local)
-		LOCAL=1
-		shift
-		;;
 	--prefix)
 		(($# >= 2)) || die "--prefix requires a path"
 		PREFIX="$2"
@@ -301,6 +364,11 @@ while (($# > 0)); do
 		GVISOR_FORCE=1
 		shift 2
 		;;
+	--codex-skills-dir)
+		(($# >= 2)) || die "--codex-skills-dir requires a path"
+		CODEX_SKILLS_DIR="$2"
+		shift 2
+		;;
 	-h|--help)
 		usage
 		exit 0
@@ -318,27 +386,24 @@ done
 [[ "$COLIMA_MEMORY" =~ ^[1-9][0-9]*(\.[0-9]+)?$ ]] || die "Colima memory must be a positive number"
 [[ "$COLIMA_DISK" =~ ^[1-9][0-9]*$ ]] || die "Colima disk size must be a positive integer"
 [[ -n "$GVISOR_VERSION" && "$GVISOR_VERSION" != *[[:space:]]* ]] || die "gVisor version cannot be empty or contain whitespace"
+[[ -n "$CODEX_SKILLS_DIR" && "$CODEX_SKILLS_DIR" != *[[:space:]]* ]] || die "Codex skill directory cannot be empty or contain whitespace"
 
 prepare_source
 require_command go
+preflight_codex_skill
 
-if ((LOCAL)); then
-	prepare_local_backend
-	build_runner_image
-fi
-
+prepare_local_backend
+build_runner_image
 install_cli
+install_codex_skill
+"$PREFIX/nox" doctor --image "$IMAGE"
 
-if ((LOCAL)); then
-	"$PREFIX/nox" doctor --image "$IMAGE"
-else
-	cat <<EOF
+cat <<EOF
 
-Nox is installed at $PREFIX/nox.
-Run this installer again with --local to prepare the local Docker/gVisor
-backend and runner image.
+Nox CLI, local Docker/gVisor backend, and Codex skill are installed.
+CLI: $PREFIX/nox
+Skill: $CODEX_SKILLS_DIR/nox
 EOF
-fi
 
 case ":${PATH}:" in
 *":${PREFIX}:"*) ;;
