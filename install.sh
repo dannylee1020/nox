@@ -281,6 +281,7 @@ preflight_codex_skill() {
 	[ -d "$source" ] || die "Nox Codex skill assets are missing from $SOURCE_DIR"
 	[ -f "$source/SKILL.md" ] || die "Nox Codex skill is missing SKILL.md"
 	[ -f "$source/references/cli.md" ] || die "Nox Codex skill is missing its CLI reference"
+	[ -f "$source/references/task-contract.md" ] || die "Nox Codex skill is missing its task contract"
 	if [ -e "$target" ] || [ -L "$target" ]; then
 		[ -d "$target" ] && [ -f "$target/.nox-skill" ] && \
 			grep -q '^format=1$' "$target/.nox-skill" || \
@@ -310,7 +311,8 @@ install_codex_skill() {
 	printf 'format=1\nsource_ref=%s\nbinary=%s\n' "$SOURCE_REF" "$binary" > "$SKILL_TEMP/.nox-skill"
 	chmod 0755 "$SKILL_TEMP" "$SKILL_TEMP/references" "$SKILL_TEMP/agents"
 	chmod 0644 "$SKILL_TEMP/SKILL.md" "$SKILL_TEMP/agents/openai.yaml" \
-		"$SKILL_TEMP/references/cli.md" "$SKILL_TEMP/references/installation.md" \
+		"$SKILL_TEMP/references/cli.md" "$SKILL_TEMP/references/task-contract.md" \
+		"$SKILL_TEMP/references/installation.md" \
 		"$SKILL_TEMP/.nox-skill"
 	grep -q '^name: nox$' "$SKILL_TEMP/SKILL.md" || die "invalid installed Nox skill metadata"
 	grep -Fq -- "$binary" "$SKILL_TEMP/references/installation.md" || \

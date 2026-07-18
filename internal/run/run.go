@@ -342,7 +342,9 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 	if err := writeState(store.StateAgentRunning); err != nil {
 		return fail(err)
 	}
-	agentResult, err := agent.Run(ctx, o.Docker, container, adapter, strings.NewReader(config.Task), agentOut, agentLog)
+	agentResult, err := agent.Run(ctx, o.Docker, container, adapter, agent.PromptContext{
+		Task: config.Task, BaseSHA: metadata.BaseSHA, Validation: config.Validation,
+	}, agentOut, agentLog)
 	metadata.ExitCode = agentResult.ExitCode
 	if err != nil || agentResult.ExitCode != 0 {
 		if err == nil {

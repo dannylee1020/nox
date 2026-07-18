@@ -32,6 +32,14 @@ Useful options:
 
 The launch command prints a run ID immediately and suggests `nox watch <run-id>`.
 
+## Task input contract
+
+Nox reads `--task` or `--task-file` on the host. The sandbox agent does not receive the parent conversation automatically.
+
+When launching from a conversational agent, hydrate the structured contract in `task-contract.md` with the user's invocation and relevant context from that thread. Its stable sections capture the objective, hard and soft constraints, plan, affected surfaces, acceptance criteria, validation, and stop conditions. Sections may contain arbitrary Markdown; use `None specified` when no relevant content exists. `Context and extra` preserves useful information that does not fit elsewhere.
+
+For Codex, Nox prepends a deterministic execution envelope containing the resolved base commit and required validation command, then preserves the hydrated contract unchanged as the final prompt payload. Nox does not parse, summarize, or semantically normalize the contract. Generic agents receive the task text unchanged. The sandbox workspace starts from the committed `--from` ref; uncommitted changes and unrecorded context from the source checkout are not included.
+
 ## Monitor and inspect
 
 ```bash

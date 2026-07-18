@@ -11,13 +11,14 @@ import (
 )
 
 type Config struct {
-	Name        string
-	Command     string
-	CodexHome   string
-	Task        string
-	TaskReader  io.Reader
-	Output      io.Writer
-	ErrorOutput io.Writer
+	Name    string
+	Command string
+}
+
+type PromptContext struct {
+	Task       string
+	BaseSHA    string
+	Validation string
 }
 
 type Adapter interface {
@@ -25,6 +26,7 @@ type Adapter interface {
 	Environment() map[string]string
 	Command() []string
 	PermissionMode() string
+	Prompt(PromptContext) string
 }
 
 type Codex struct{}
@@ -41,12 +43,31 @@ func (Codex) Command() []string {
 	return []string{"codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--ephemeral", "-"}
 }
 
+func (Codex) Prompt(context PromptContext) string {
+	return fmt.Sprintf(`# Nox sandbox execution envelope v1
+
+Execute and test the delegated contract below.
+Do not revisit established product or architecture decisions.
+Use implementation judgment only where flexibility remains.
+Report blockers instead of inventing material decisions.
+
+Workspace: /workspace
+Base commit: %s
+Required validation: %s
+Nox will run this validation again after agent execution.
+
+## Hydrated execution contract
+
+%s`, context.BaseSHA, context.Validation, context.Task)
+}
+
 type Generic struct{ Cmd string }
 
-func (g Generic) Name() string                   { return "generic" }
-func (g Generic) Environment() map[string]string { return map[string]string{"HOME": "/home/nox"} }
-func (g Generic) Command() []string              { return []string{"sh", "-lc", g.Cmd} }
-func (g Generic) PermissionMode() string         { return "outer-sandbox" }
+func (g Generic) Name() string                        { return "generic" }
+func (g Generic) Environment() map[string]string      { return map[string]string{"HOME": "/home/nox"} }
+func (g Generic) Command() []string                   { return []string{"sh", "-lc", g.Cmd} }
+func (g Generic) PermissionMode() string              { return "outer-sandbox" }
+func (g Generic) Prompt(context PromptContext) string { return context.Task }
 
 func New(config Config) (Adapter, error) {
 	switch config.Name {
@@ -62,8 +83,8 @@ func New(config Config) (Adapter, error) {
 	}
 }
 
-func Run(ctx context.Context, docker sandbox.Docker, container sandbox.Container, adapter Adapter, task io.Reader, stdout, stderr io.Writer) (execx.Result, error) {
-	result, err := docker.Exec(ctx, container, adapter.Command(), task, stdout, stderr)
+func Run(ctx context.Context, docker sandbox.Docker, container sandbox.Container, adapter Adapter, prompt PromptContext, stdout, stderr io.Writer) (execx.Result, error) {
+	result, err := docker.Exec(ctx, container, adapter.Command(), strings.NewReader(adapter.Prompt(prompt)), stdout, stderr)
 	if err != nil {
 		return result, fmt.Errorf("agent %s: %w", adapter.Name(), err)
 	}

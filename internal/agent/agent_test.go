@@ -33,6 +33,32 @@ func TestCodexAdapter(t *testing.T) {
 	}
 }
 
+func TestCodexPromptAddsExecutionEnvelopeWithoutRewritingContract(t *testing.T) {
+	contract := "# Nox execution contract v1\n\n## Context and extra\n\n100% preserved: do not normalize this.\n"
+	got := (Codex{}).Prompt(PromptContext{
+		Task: contract, BaseSHA: "0123456789abcdef", Validation: "go test ./... && printf '100%%'",
+	})
+	for _, want := range []string{
+		"# Nox sandbox execution envelope v1",
+		"Base commit: 0123456789abcdef",
+		"Required validation: go test ./... && printf '100%%'",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("prompt missing %q: %s", want, got)
+		}
+	}
+	if !strings.HasSuffix(got, contract) {
+		t.Fatalf("prompt does not preserve contract as its final payload: %q", got)
+	}
+}
+
+func TestGenericPromptPreservesTask(t *testing.T) {
+	contract := "arbitrary task\n\n## Context and extra\n% complete\n"
+	if got := (Generic{Cmd: "true"}).Prompt(PromptContext{Task: contract, BaseSHA: "ignored", Validation: "ignored"}); got != contract {
+		t.Fatalf("generic prompt = %q, want %q", got, contract)
+	}
+}
+
 func TestGenericAdapterRequiresCommand(t *testing.T) {
 	if _, err := New(Config{Name: "generic"}); err == nil {
 		t.Fatal("expected missing generic command error")
