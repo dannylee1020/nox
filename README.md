@@ -1,11 +1,7 @@
 # Nox
 
-Nox is a local and self-hosted remote sandbox for coding agents. It runs agent code in an isolated environment for safer execution, then publishes validated results without modifying the caller's source checkout.
+Nox is a sandbox environment for codex. It runs agent code in an isolated environment for safer execution, then publishes validated results without modifying the caller's source checkout.
 
-```text
-local:  Git ref → isolated clone → Docker + runsc → agent → validation → local branch → teardown
-remote: API request → isolated clone → Docker + runsc → agent → validation → GitHub PR → teardown
-```
 
 ## Install
 
@@ -98,10 +94,10 @@ nox launch \
 
 Nox stages `~/.codex` into a read-only per-run volume and gives Codex a disposable writable home. Select another host directory with `--codex-home /path/to/codex-home`.
 
-After installing the skill, use Codex directly:
+After installing the skill, use the skill directly:
 
 ```text
-$nox Implement the requested change and validate it with go test ./...
+$nox Implement the requested change.
 ```
 
 `nox launch` defaults to `--network online`, which most hosted agents require. Use `--network none` for offline runs.
@@ -117,7 +113,7 @@ Each launch:
 5. Exports the workspace, reconstructs it in a separate host clone, and creates one host-generated squashed commit on the requested local branch.
 6. Removes the container and volumes. Successful workspaces are removed; failed workspaces and logs are retained for inspection.
 
-Nox never checks out, pushes, or opens a pull request. No branch is created if there are no changes or if the agent, validation, export, cancellation, timeout, or branch-collision path fails.
+No branch is created if there are no changes or if the agent, validation, export, cancellation, timeout, or branch-collision path fails.
 
 At launch start, Nox prints the run ID and a monitoring command:
 
@@ -184,7 +180,7 @@ Run `nox launch --help` or `nox submit --help` for execution options.
 
 Nox can run as a private, single-node remote worker on Linux. Start `nox serve` on a VM with Docker/gVisor and submit authenticated GitHub run requests. Successful validated runs push a `nox/<run-id>` branch and create a pull request; remote users receive concise status and the PR URL rather than raw logs or patches.
 
-Remote API requests require `Authorization: Bearer <token>`, matching the server's `NOX_API_TOKEN`. This caller token is separate from `NOX_GITHUB_TOKEN`, which Nox uses for GitHub operations.
+Remote API requests require `Authorization: Bearer <token>`, matching the server's `NOX_API_TOKEN`.
 
 For normal Codex use, configure `NOX_REMOTE_URL` and `NOX_API_TOKEN` on the client. The `$nox` skill then uses `nox submit` to verify the current GitHub branch, dispatch the contract, poll the remote worker, and report the resulting pull request. Manual API calls are intended for diagnostics and integrations.
 
