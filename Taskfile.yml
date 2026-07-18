@@ -1,0 +1,7 @@
+version: '3'
+
+tasks:
+  install:
+    desc: Install the Nox CLI, local runtime, and Codex skill
+    cmds:
+      - ./install.sh
