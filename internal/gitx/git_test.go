@@ -146,6 +146,42 @@ func TestPushUsesNamedRemoteBranch(t *testing.T) {
 	}
 }
 
+type remoteDiscoveryRunner struct {
+	commands []execx.Command
+}
+
+func (r *remoteDiscoveryRunner) Run(_ context.Context, command execx.Command) (execx.Result, error) {
+	r.commands = append(r.commands, command)
+	switch strings.Join(command.Args, " ") {
+	case "symbolic-ref --quiet --short HEAD":
+		return execx.Result{Stdout: "main\n"}, nil
+	case "config --get remote.origin.url":
+		return execx.Result{Stdout: "git@github.com:acme/demo.git\n"}, nil
+	case "ls-remote --heads origin refs/heads/main":
+		return execx.Result{Stdout: "0123456789abcdef0123456789abcdef01234567\trefs/heads/main\n"}, nil
+	default:
+		return execx.Result{ExitCode: 1}, errors.New("unexpected Git command")
+	}
+}
+
+func TestRemoteDiscoveryUsesOriginBranchAndCommit(t *testing.T) {
+	runner := &remoteDiscoveryRunner{}
+	git := Git{Runner: runner}
+	ctx := context.Background()
+	branch, err := git.CurrentBranch(ctx, "/tmp/repo")
+	if err != nil || branch != "main" {
+		t.Fatalf("current branch = %q, %v", branch, err)
+	}
+	remote, err := git.RemoteURL(ctx, "/tmp/repo", "origin")
+	if err != nil || remote != "git@github.com:acme/demo.git" {
+		t.Fatalf("remote URL = %q, %v", remote, err)
+	}
+	commit, err := git.RemoteBranchCommit(ctx, "/tmp/repo", "origin", "main")
+	if err != nil || commit != "0123456789abcdef0123456789abcdef01234567" {
+		t.Fatalf("remote commit = %q, %v", commit, err)
+	}
+}
+
 func TestPublishRejectsExistingBranch(t *testing.T) {
 	ctx := context.Background()
 	source := t.TempDir()

@@ -46,11 +46,25 @@ NOX_GIT_NAME=Nox Worker
 NOX_GIT_EMAIL=nox@localhost
 ```
 
-Authenticate Codex into the service user's dedicated directory:
+Authenticate a ChatGPT account on the headless worker with device authorization:
 
 ```bash
-sudo -u nox -H env HOME=/var/lib/nox CODEX_HOME=/var/lib/nox/codex codex login
+sudo -u nox -H env \
+  HOME=/var/lib/nox \
+  CODEX_HOME=/var/lib/nox/codex \
+  codex login --device-auth
 ```
+
+Open the printed URL on another machine, enter the one-time code, then verify with the same environment:
+
+```bash
+sudo -u nox -H env \
+  HOME=/var/lib/nox \
+  CODEX_HOME=/var/lib/nox/codex \
+  codex login status
+```
+
+For fully unattended, usage-based authentication, pipe a dedicated OpenAI API key into `codex login --with-api-key` instead. Store either credential as a secret.
 
 Tokens stay in the trusted API process. They are not put in task contracts, workspace files, Git URLs, command arguments, or sandbox environment variables.
 
@@ -72,9 +86,20 @@ Check readiness:
 curl http://127.0.0.1:8080/healthz
 ```
 
-## API
+## Codex client
 
-Submit a run:
+For normal use, configure the machine running Codex instead of submitting requests manually:
+
+```bash
+export NOX_REMOTE_URL=https://nox.internal.example
+export NOX_API_TOKEN=<private-api-token>
+```
+
+When the user invokes `$nox`, the skill runs `nox submit`, which verifies the current GitHub branch, sends the execution contract, polls the worker, and reports the pull request URL. The client does not require local Docker or `nox doctor`.
+
+## Direct API
+
+Use the API directly for diagnostics or integrations. Submit a run:
 
 ```bash
 curl -fsS -X POST http://127.0.0.1:8080/v1/runs \

@@ -67,6 +67,48 @@ func (g Git) ResolveCommit(ctx context.Context, repo, ref string) (string, error
 	return strings.TrimSpace(result.Stdout), nil
 }
 
+func (g Git) CurrentBranch(ctx context.Context, repo string) (string, error) {
+	result, err := g.command(ctx, repo, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("resolve current branch: %w", err)
+	}
+	branch := strings.TrimSpace(result.Stdout)
+	if branch == "" {
+		return "", fmt.Errorf("current checkout is detached")
+	}
+	return branch, nil
+}
+
+func (g Git) RemoteURL(ctx context.Context, repo, remote string) (string, error) {
+	if strings.TrimSpace(remote) == "" {
+		return "", fmt.Errorf("Git remote is required")
+	}
+	result, err := g.command(ctx, repo, "config", "--get", "remote."+remote+".url")
+	if err != nil {
+		return "", fmt.Errorf("read Git remote %q: %w", remote, err)
+	}
+	value := strings.TrimSpace(result.Stdout)
+	if value == "" {
+		return "", fmt.Errorf("Git remote %q has no URL", remote)
+	}
+	return value, nil
+}
+
+func (g Git) RemoteBranchCommit(ctx context.Context, repo, remote, branch string) (string, error) {
+	if strings.TrimSpace(remote) == "" || strings.TrimSpace(branch) == "" {
+		return "", fmt.Errorf("Git remote and branch are required")
+	}
+	result, err := g.command(ctx, repo, "ls-remote", "--heads", remote, "refs/heads/"+branch)
+	if err != nil {
+		return "", fmt.Errorf("resolve remote branch %q: %w", branch, err)
+	}
+	fields := strings.Fields(result.Stdout)
+	if len(fields) < 2 || fields[0] == "" {
+		return "", fmt.Errorf("remote branch %q was not found", branch)
+	}
+	return fields[0], nil
+}
+
 func (g Git) Dirty(ctx context.Context, repo string) (bool, error) {
 	result, err := g.command(ctx, repo, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {

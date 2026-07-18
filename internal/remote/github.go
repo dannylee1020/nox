@@ -40,6 +40,41 @@ func ParseRepository(repository string) (owner, name string, err error) {
 	return parts[0], parts[1], nil
 }
 
+func ParseGitHubRemoteURL(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(value, "git@") {
+		parts := strings.SplitN(value, ":", 2)
+		if len(parts) != 2 || !strings.EqualFold(parts[0], "git@github.com") {
+			return "", fmt.Errorf("Git remote is not a GitHub URL")
+		}
+		return normalizeRepositoryPath(parts[1])
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Hostname() == "" || !strings.EqualFold(parsed.Hostname(), "github.com") || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("Git remote is not a GitHub URL")
+	}
+	if parsed.User != nil {
+		_, passwordSet := parsed.User.Password()
+		if parsed.User.Username() != "git" || passwordSet {
+			return "", fmt.Errorf("Git remote is not a supported GitHub URL")
+		}
+	}
+	if parsed.Scheme != "https" && parsed.Scheme != "http" && parsed.Scheme != "ssh" {
+		return "", fmt.Errorf("Git remote is not a supported GitHub URL")
+	}
+	return normalizeRepositoryPath(parsed.Path)
+}
+
+func normalizeRepositoryPath(path string) (string, error) {
+	path = strings.Trim(path, "/")
+	path = strings.TrimSuffix(path, ".git")
+	owner, name, err := ParseRepository(path)
+	if err != nil {
+		return "", err
+	}
+	return owner + "/" + name, nil
+}
+
 func validRepositoryPart(value string) bool {
 	if value == "" || value == "." || value == ".." {
 		return false

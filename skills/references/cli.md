@@ -31,6 +31,21 @@ Useful options:
 
 The launch command prints a run ID immediately and suggests `nox watch <run-id>`.
 
+## Remote submit
+
+When `NOX_REMOTE_URL` is configured, submit through the remote worker instead of running local Docker:
+
+```bash
+nox submit \
+  --repo <repository-root> \
+  --from <committed-branch> \
+  --title "<pull-request-title>" \
+  --task-file <task-file> \
+  --validate <command>
+```
+
+`nox submit` reads `NOX_API_TOKEN`, verifies that the local branch matches the GitHub `origin`, submits the execution contract, and polls until the worker reports a pull request, no changes, failure, or cancellation. It does not run `nox doctor` locally.
+
 ## Task input contract
 
 Nox reads `--task` or `--task-file` on the host. The sandbox agent does not receive the parent conversation automatically.
@@ -61,4 +76,4 @@ A successful launch:
 
 A failed or cancelled launch does not publish a branch. Nox retains the exported workspace and logs for inspection.
 
-Nox does not push, open pull requests, switch the source checkout, or overwrite an existing local branch.
+Nox does not push the caller's source branch, switch the source checkout, overwrite an existing local branch, or merge remote pull requests. Remote execution pushes only the worker-generated `nox/<run-id>` branch on the server.

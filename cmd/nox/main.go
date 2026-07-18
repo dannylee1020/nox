@@ -21,13 +21,14 @@ import (
 	"github.com/nox-dev/nox/internal/store"
 )
 
-const usageText = `Nox runs a coding agent inside a local Docker/gVisor sandbox.
+const usageText = `Nox runs coding agents inside local or remote Docker/gVisor sandboxes.
 
 Commands:
   nox watch <run-id>
   nox doctor
   nox serve
   nox launch --repo . --from main --output-branch nox/change --task "..." --validate "..."
+  nox submit --repo . --from main --title "..." --task-file contract.md --validate "..."
   nox inspect <run-id>
   nox diff <run-id>
   nox cleanup <run-id>
@@ -47,6 +48,8 @@ func main() {
 		err = doctor(os.Args[2:])
 	case "launch":
 		err = launch(os.Args[2:])
+	case "submit":
+		err = submit(os.Args[2:])
 	case "serve":
 		err = serve(os.Args[2:])
 	case "inspect":

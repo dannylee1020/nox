@@ -170,6 +170,7 @@ Published result commits use the effective `user.name` and `user.email` from the
 ```text
 nox doctor
 nox launch --repo <path> --from <ref> --output-branch <branch> [options]
+nox submit --repo <path> --from <branch> --title <title> --task-file <file> --validate <command>
 nox inspect <run-id>       # print metadata
 nox watch <run-id>         # follow lifecycle and logs
 nox diff <run-id>          # print the published patch
@@ -177,11 +178,15 @@ nox cleanup <run-id>       # remove the run, container, and volumes
 nox cleanup --stale        # remove all Nox-managed containers and volumes
 ```
 
-Run `nox launch --help` for all launch options.
+Run `nox launch --help` or `nox submit --help` for execution options.
 
 ## Remote self-hosting
 
 Nox can run as a private, single-node remote worker on Linux. Start `nox serve` on a VM with Docker/gVisor and submit authenticated GitHub run requests. Successful validated runs push a `nox/<run-id>` branch and create a pull request; remote users receive concise status and the PR URL rather than raw logs or patches.
+
+Remote API requests require `Authorization: Bearer <token>`, matching the server's `NOX_API_TOKEN`. This caller token is separate from `NOX_GITHUB_TOKEN`, which Nox uses for GitHub operations.
+
+For normal Codex use, configure `NOX_REMOTE_URL` and `NOX_API_TOKEN` on the client. The `$nox` skill then uses `nox submit` to verify the current GitHub branch, dispatch the contract, poll the remote worker, and report the resulting pull request. Manual API calls are intended for diagnostics and integrations.
 
 See [docs/remote.md](docs/remote.md) for deployment, configuration, API examples, and operator diagnostics.
 

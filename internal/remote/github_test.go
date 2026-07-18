@@ -21,6 +21,26 @@ func TestParseRepository(t *testing.T) {
 	}
 }
 
+func TestParseGitHubRemoteURL(t *testing.T) {
+	cases := map[string]string{
+		"https://github.com/acme/demo.git":   "acme/demo",
+		"ssh://git@github.com/acme/demo.git": "acme/demo",
+		"git@github.com:acme/demo.git":       "acme/demo",
+		"https://github.com/acme/demo":       "acme/demo",
+	}
+	for input, want := range cases {
+		got, err := ParseGitHubRemoteURL(input)
+		if err != nil || got != want {
+			t.Errorf("ParseGitHubRemoteURL(%q) = %q, %v; want %q", input, got, err, want)
+		}
+	}
+	for _, input := range []string{"https://gitlab.com/acme/demo.git", "git@gitlab.com:acme/demo.git", "https://github.com/acme/demo/extra.git"} {
+		if _, err := ParseGitHubRemoteURL(input); err == nil {
+			t.Errorf("ParseGitHubRemoteURL(%q) succeeded", input)
+		}
+	}
+}
+
 func TestGitHubClientCreatesPullRequestWithoutLeakingToken(t *testing.T) {
 	const token = "secret-token"
 	var request *http.Request
