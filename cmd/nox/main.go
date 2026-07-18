@@ -24,7 +24,7 @@ const usageText = `Nox runs a coding agent inside a local Docker/gVisor sandbox.
 Commands:
   nox watch <run-id>
   nox doctor
-  nox launch --repo . --from main --output-branch nox/change --agent codex --task "..." --validate "..."
+  nox launch --repo . --from main --output-branch nox/change --task "..." --validate "..."
   nox inspect <run-id>
   nox diff <run-id>
   nox cleanup <run-id>
@@ -88,8 +88,6 @@ func launch(args []string) error {
 	repo := fs.String("repo", ".", "local Git repository")
 	from := fs.String("from", "", "local branch or ref to launch from")
 	outputBranch := fs.String("output-branch", "", "new local branch to create after validation")
-	agentName := fs.String("agent", "codex", "agent: codex or generic")
-	agentCommand := fs.String("agent-command", "", "generic agent command run inside the sandbox")
 	task := fs.String("task", "", "agent task")
 	taskFile := fs.String("task-file", "", "file containing the agent task")
 	validate := fs.String("validate", "", "explicit validation command")
@@ -136,8 +134,8 @@ func launch(args []string) error {
 	defer stop()
 	orchestrator := run.New()
 	result, err := orchestrator.Launch(ctx, run.Config{
-		Repo: *repo, From: *from, OutputBranch: *outputBranch, Agent: *agentName,
-		AgentCommand: *agentCommand, Task: *task, Validation: *validate, Network: *network,
+		Repo: *repo, From: *from, OutputBranch: *outputBranch,
+		Task: *task, Validation: *validate, Network: *network,
 		Image: *image, StateRoot: *stateRoot, CodexHome: *codexHome, CPU: *cpu, Memory: *memory,
 		PIDs: *pids, Timeout: *timeout, Output: output, ErrorOutput: os.Stderr,
 		OnStart: func(metadata store.Metadata) error {

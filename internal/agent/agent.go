@@ -10,11 +10,6 @@ import (
 	"github.com/nox-dev/nox/internal/sandbox"
 )
 
-type Config struct {
-	Name    string
-	Command string
-}
-
 type PromptContext struct {
 	Task       string
 	BaseSHA    string
@@ -59,28 +54,6 @@ Nox will run this validation again after agent execution.
 ## Hydrated execution contract
 
 %s`, context.BaseSHA, context.Validation, context.Task)
-}
-
-type Generic struct{ Cmd string }
-
-func (g Generic) Name() string                        { return "generic" }
-func (g Generic) Environment() map[string]string      { return map[string]string{"HOME": "/home/nox"} }
-func (g Generic) Command() []string                   { return []string{"sh", "-lc", g.Cmd} }
-func (g Generic) PermissionMode() string              { return "outer-sandbox" }
-func (g Generic) Prompt(context PromptContext) string { return context.Task }
-
-func New(config Config) (Adapter, error) {
-	switch config.Name {
-	case "codex":
-		return Codex{}, nil
-	case "generic":
-		if strings.TrimSpace(config.Command) == "" {
-			return nil, fmt.Errorf("--agent-command is required for the generic agent")
-		}
-		return Generic{Cmd: config.Command}, nil
-	default:
-		return nil, fmt.Errorf("unsupported agent %q; use codex or generic", config.Name)
-	}
 }
 
 func Run(ctx context.Context, docker sandbox.Docker, container sandbox.Container, adapter Adapter, prompt PromptContext, stdout, stderr io.Writer) (execx.Result, error) {

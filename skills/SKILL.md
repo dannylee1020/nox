@@ -26,7 +26,6 @@ Use Nox when the user explicitly asks for sandboxed execution. Do not launch Nox
      --repo <repository-root> \
      --from <current-branch> \
      --output-branch <new-local-branch> \
-     --agent codex \
      --task-file <task-file> \
      --validate <validation-command>
    ```

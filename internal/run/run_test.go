@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nox-dev/nox/internal/agent"
 	"github.com/nox-dev/nox/internal/execx"
 	"github.com/nox-dev/nox/internal/sandbox"
 	"github.com/nox-dev/nox/internal/store"
@@ -18,6 +19,24 @@ type fakeDockerRunner struct {
 	volumePath string
 	removed    bool
 	agentDone  bool
+}
+
+type testAdapter struct {
+	command string
+}
+
+func (testAdapter) Name() string { return "test" }
+func (testAdapter) Environment() map[string]string {
+	return map[string]string{"HOME": "/home/nox"}
+}
+func (a testAdapter) Command() []string                       { return []string{"sh", "-lc", a.command} }
+func (testAdapter) PermissionMode() string                    { return "outer-sandbox" }
+func (testAdapter) Prompt(context agent.PromptContext) string { return context.Task }
+
+func newTestOrchestrator(command string) Orchestrator {
+	orchestrator := New()
+	orchestrator.Adapter = testAdapter{command: command}
+	return orchestrator
 }
 
 func (f *fakeDockerRunner) Run(_ context.Context, command execx.Command) (execx.Result, error) {
@@ -128,11 +147,11 @@ func TestLaunchPublishesValidatedLocalBranchAndTearsDown(t *testing.T) {
 	initRunFixture(t, source)
 	state := t.TempDir()
 	fake := &fakeDockerRunner{}
-	orchestrator := New()
+	orchestrator := newTestOrchestrator("true")
 	orchestrator.Docker = sandbox.Docker{Runner: fake}
 	result, err := orchestrator.Launch(context.Background(), Config{
-		Repo: source, From: "main", OutputBranch: "nox/result", Agent: "generic",
-		AgentCommand: "true", Task: "create generated file", Validation: "test -f generated.txt",
+		Repo: source, From: "main", OutputBranch: "nox/result",
+		Task: "create generated file", Validation: "test -f generated.txt",
 		Network: "none", Image: "nox-runner:v0", StateRoot: state, Timeout: time.Minute,
 		Output: io.Discard, ErrorOutput: io.Discard,
 	})
@@ -167,11 +186,11 @@ func TestLaunchAnnouncesReadableRun(t *testing.T) {
 	state := t.TempDir()
 	fake := &fakeDockerRunner{}
 	var announced store.Metadata
-	orchestrator := New()
+	orchestrator := newTestOrchestrator("no-op")
 	orchestrator.Docker = sandbox.Docker{Runner: fake}
 	result, err := orchestrator.Launch(context.Background(), Config{
-		Repo: source, From: "main", OutputBranch: "nox/announced", Agent: "generic",
-		AgentCommand: "no-op", Task: "announce", Validation: "true",
+		Repo: source, From: "main", OutputBranch: "nox/announced",
+		Task: "announce", Validation: "true",
 		Network: "none", Image: "nox-runner:v0", StateRoot: state, Timeout: time.Minute,
 		Output: io.Discard, ErrorOutput: io.Discard,
 		OnStart: func(metadata store.Metadata) error {
@@ -199,11 +218,11 @@ func TestLaunchNoChangesDoesNotPublish(t *testing.T) {
 	initRunFixture(t, source)
 	state := t.TempDir()
 	fake := &fakeDockerRunner{}
-	orchestrator := New()
+	orchestrator := newTestOrchestrator("no-op")
 	orchestrator.Docker = sandbox.Docker{Runner: fake}
 	result, err := orchestrator.Launch(context.Background(), Config{
-		Repo: source, From: "main", OutputBranch: "nox/no-change", Agent: "generic",
-		AgentCommand: "no-op", Task: "do nothing", Validation: "true",
+		Repo: source, From: "main", OutputBranch: "nox/no-change",
+		Task: "do nothing", Validation: "true",
 		Network: "none", Image: "nox-runner:v0", StateRoot: state, Timeout: time.Minute,
 		Output: io.Discard, ErrorOutput: io.Discard,
 	})
@@ -226,11 +245,11 @@ func TestLaunchValidationFailureDoesNotPublish(t *testing.T) {
 	initRunFixture(t, source)
 	state := t.TempDir()
 	fake := &fakeDockerRunner{}
-	orchestrator := New()
+	orchestrator := newTestOrchestrator("true")
 	orchestrator.Docker = sandbox.Docker{Runner: fake}
 	_, err := orchestrator.Launch(context.Background(), Config{
-		Repo: source, From: "main", OutputBranch: "nox/failure", Agent: "generic",
-		AgentCommand: "true", Task: "create generated file", Validation: "false",
+		Repo: source, From: "main", OutputBranch: "nox/failure",
+		Task: "create generated file", Validation: "false",
 		Network: "none", Image: "nox-runner:v0", StateRoot: state, Timeout: time.Minute,
 		Output: io.Discard, ErrorOutput: io.Discard,
 	})

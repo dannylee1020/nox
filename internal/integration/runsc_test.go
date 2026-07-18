@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nox-dev/nox/internal/agent"
 	noxrun "github.com/nox-dev/nox/internal/run"
 	"github.com/nox-dev/nox/internal/store"
 )
@@ -36,7 +37,19 @@ func TestRunscRunnerImage(t *testing.T) {
 	}
 }
 
-func TestRunscGenericLaunch(t *testing.T) {
+type integrationAdapter struct {
+	command string
+}
+
+func (integrationAdapter) Name() string { return "integration" }
+func (integrationAdapter) Environment() map[string]string {
+	return map[string]string{"HOME": "/home/nox"}
+}
+func (a integrationAdapter) Command() []string                       { return []string{"sh", "-lc", a.command} }
+func (integrationAdapter) PermissionMode() string                    { return "outer-sandbox" }
+func (integrationAdapter) Prompt(context agent.PromptContext) string { return context.Task }
+
+func TestRunscLaunch(t *testing.T) {
 	if os.Getenv("NOX_RUNSC_INTEGRATION") != "1" {
 		t.Skip("set NOX_RUNSC_INTEGRATION=1 on a Linux Docker or Colima host to run the real Nox launch")
 	}
@@ -45,9 +58,10 @@ func TestRunscGenericLaunch(t *testing.T) {
 	state := t.TempDir()
 	base := gitOutput(t, source, "rev-parse", "main")
 	orchestrator := noxrun.New()
+	orchestrator.Adapter = integrationAdapter{command: "printf 'integration-ok\\n' > generated.txt"}
 	result, err := orchestrator.Launch(context.Background(), noxrun.Config{
-		Repo: source, From: "main", OutputBranch: "nox/integration", Agent: "generic",
-		AgentCommand: "printf 'integration-ok\\n' > generated.txt", Task: "create generated.txt",
+		Repo: source, From: "main", OutputBranch: "nox/integration",
+		Task:       "create generated.txt",
 		Validation: "test \"$(cat generated.txt)\" = integration-ok", Network: "none",
 		Image: runnerImage(), StateRoot: state, Timeout: 5 * time.Minute,
 		Output: io.Discard, ErrorOutput: io.Discard,

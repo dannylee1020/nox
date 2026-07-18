@@ -7,10 +7,7 @@ import (
 )
 
 func TestCodexAdapter(t *testing.T) {
-	adapter, err := New(Config{Name: "codex"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	adapter := Codex{}
 	if adapter.Name() != "codex" {
 		t.Fatalf("name = %q", adapter.Name())
 	}
@@ -23,13 +20,6 @@ func TestCodexAdapter(t *testing.T) {
 	}
 	if got := adapter.Environment()["CODEX_HOME"]; got != "/home/nox/.codex" {
 		t.Fatalf("CODEX_HOME = %q", got)
-	}
-	generic, err := New(Config{Name: "generic", Command: "true"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if generic.PermissionMode() != "outer-sandbox" {
-		t.Fatalf("generic permission mode = %q", generic.PermissionMode())
 	}
 }
 
@@ -49,25 +39,5 @@ func TestCodexPromptAddsExecutionEnvelopeWithoutRewritingContract(t *testing.T) 
 	}
 	if !strings.HasSuffix(got, contract) {
 		t.Fatalf("prompt does not preserve contract as its final payload: %q", got)
-	}
-}
-
-func TestGenericPromptPreservesTask(t *testing.T) {
-	contract := "arbitrary task\n\n## Context and extra\n% complete\n"
-	if got := (Generic{Cmd: "true"}).Prompt(PromptContext{Task: contract, BaseSHA: "ignored", Validation: "ignored"}); got != contract {
-		t.Fatalf("generic prompt = %q, want %q", got, contract)
-	}
-}
-
-func TestGenericAdapterRequiresCommand(t *testing.T) {
-	if _, err := New(Config{Name: "generic"}); err == nil {
-		t.Fatal("expected missing generic command error")
-	}
-	adapter, err := New(Config{Name: "generic", Command: "printf ok"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.Join(adapter.Command(), " "); got != "sh -lc printf ok" {
-		t.Fatalf("generic command = %q", got)
 	}
 }

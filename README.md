@@ -64,22 +64,6 @@ The v0 installer defaults to source branch `main` and gVisor `latest`. For repro
 
 ## Quick start
 
-### Deterministic local agent
-
-Test the full lifecycle without a hosted model:
-
-```bash
-nox launch \
-  --repo . \
-  --from main \
-  --output-branch nox/generic-smoke \
-  --agent generic \
-  --agent-command 'printf "nox-ok\n" > nox-proof.txt' \
-  --task 'create a proof file' \
-  --validate 'test "$(cat nox-proof.txt)" = nox-ok' \
-  --network none
-```
-
 ### Codex
 
 The Codex adapter is built in and requires authentication under `~/.codex`.
@@ -94,7 +78,6 @@ nox launch \
   --repo . \
   --from main \
   --output-branch nox/fix-auth \
-  --agent codex \
   --task 'Fix the authentication tests' \
   --validate 'go test ./...' \
   --network online
@@ -212,4 +195,4 @@ NOX_RUNNER_IMAGE=nox-runner:v0 \
 go test -tags=integration -v ./...
 ```
 
-These tests are skipped unless `NOX_RUNSC_INTEGRATION=1` is set. They cover the `runsc` image smoke test and a real generic launch using VM-native workspace storage. A skipped test does not prove that `runsc` works.
+These tests are skipped unless `NOX_RUNSC_INTEGRATION=1` is set. They cover the `runsc` image smoke test and a real Nox launch using VM-native workspace storage. A skipped test does not prove that `runsc` works.

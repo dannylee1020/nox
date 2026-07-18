@@ -23,8 +23,6 @@ type Config struct {
 	Repo         string
 	From         string
 	OutputBranch string
-	Agent        string
-	AgentCommand string
 	Task         string
 	Validation   string
 	Network      string
@@ -46,17 +44,19 @@ type Result struct {
 }
 
 type Orchestrator struct {
-	Git    gitx.Git
-	Docker sandbox.Docker
-	Store  store.Store
+	Git     gitx.Git
+	Docker  sandbox.Docker
+	Store   store.Store
+	Adapter agent.Adapter
 }
 
 func New() Orchestrator {
 	home, _ := os.UserHomeDir()
 	return Orchestrator{
-		Git:    gitx.Git{Runner: execx.Runner{}},
-		Docker: sandbox.Docker{Runner: execx.Runner{}},
-		Store:  store.New(filepath.Join(home, ".nox", "runs")),
+		Git:     gitx.Git{Runner: execx.Runner{}},
+		Docker:  sandbox.Docker{Runner: execx.Runner{}},
+		Store:   store.New(filepath.Join(home, ".nox", "runs")),
+		Adapter: agent.Codex{},
 	}
 }
 
@@ -103,13 +103,9 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 	if strings.TrimSpace(config.Validation) == "" {
 		return result, fmt.Errorf("--validate is required")
 	}
-	adapterConfig := agent.Config{Name: config.Agent, Command: config.AgentCommand}
-	if adapterConfig.Name == "" {
-		adapterConfig.Name = "codex"
-	}
-	adapter, err := agent.New(adapterConfig)
-	if err != nil {
-		return result, err
+	adapter := o.Adapter
+	if adapter == nil {
+		adapter = agent.Codex{}
 	}
 
 	//create the run context and durable run metadata.
