@@ -1,0 +1,18 @@
+[Unit]
+Description=Nox self-hosted remote execution API
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=nox
+Group=nox
+SupplementaryGroups=docker
+EnvironmentFile=/etc/nox/nox.env
+ExecStart=/usr/local/bin/nox serve
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

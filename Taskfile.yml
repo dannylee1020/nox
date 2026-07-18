@@ -1,7 +1,11 @@
 version: '3'
 
 tasks:
-  install:
-    desc: Install the Nox CLI, local runtime, and Codex skill
+  install:local:
+    desc: Install the local Nox CLI, runtime, and Codex skill
     cmds:
-      - ./install.sh
+      - ./install.sh local
+  install:remote:
+    desc: Install the Linux Nox remote worker without starting it
+    cmds:
+      - ./install.sh remote

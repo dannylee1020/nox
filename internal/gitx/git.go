@@ -13,6 +13,7 @@ import (
 
 type Git struct {
 	Runner execx.CommandRunner
+	Env    []string
 }
 
 type Identity struct {
@@ -21,7 +22,7 @@ type Identity struct {
 }
 
 func (g Git) command(ctx context.Context, dir string, args ...string) (execx.Result, error) {
-	return g.Runner.Run(ctx, execx.Command{Name: "git", Args: args, Dir: dir})
+	return g.Runner.Run(ctx, execx.Command{Name: "git", Args: args, Dir: dir, Env: g.Env})
 }
 
 func (g Git) Identity(ctx context.Context, repo string) (Identity, error) {
@@ -98,6 +99,7 @@ func (g Git) CloneAt(ctx context.Context, repo, sha, destination string) error {
 	if _, err := g.Runner.Run(ctx, execx.Command{
 		Name: "git",
 		Args: []string{"clone", "--no-hardlinks", "--no-local", repo, destination},
+		Env:  g.Env,
 	}); err != nil {
 		return fmt.Errorf("clone source: %w", err)
 	}
@@ -146,6 +148,7 @@ func (g Git) Publish(ctx context.Context, sourceRepo, baseSHA, outputBranch, wor
 	if _, err := g.Runner.Run(ctx, execx.Command{
 		Name: "git",
 		Args: []string{"clone", "--no-hardlinks", "--no-local", sourceRepo, publishDir},
+		Env:  g.Env,
 	}); err != nil {
 		return "", false, fmt.Errorf("clone publish repository: %w", err)
 	}
@@ -200,10 +203,23 @@ func (g Git) Publish(ctx context.Context, sourceRepo, baseSHA, outputBranch, wor
 		Name: "git",
 		Args: []string{"fetch", "--no-write-fetch-head", publishDir, "HEAD:refs/heads/" + outputBranch},
 		Dir:  sourceRepo,
+		Env:  g.Env,
 	}); err != nil {
 		return "", false, fmt.Errorf("publish local branch: %w", err)
 	}
 	return sha, true, nil
+}
+
+func (g Git) Push(ctx context.Context, repo, remote, branch string) error {
+	if _, err := g.Runner.Run(ctx, execx.Command{
+		Name: "git",
+		Args: []string{"push", remote, "refs/heads/" + branch + ":refs/heads/" + branch},
+		Dir:  repo,
+		Env:  g.Env,
+	}); err != nil {
+		return fmt.Errorf("push branch %q: %w", branch, err)
+	}
+	return nil
 }
 
 func clearWorkingTree(root string) error {

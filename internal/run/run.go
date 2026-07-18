@@ -20,6 +20,7 @@ import (
 )
 
 type Config struct {
+	RunID        string
 	Repo         string
 	From         string
 	OutputBranch string
@@ -111,7 +112,12 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 	//create the run context and durable run metadata.
 	ctx, cancel := context.WithTimeout(parent, config.Timeout)
 	defer cancel()
-	id := NewID()
+	id := config.RunID
+	if id == "" {
+		id = NewID()
+	} else if !validRunID(id) {
+		return result, fmt.Errorf("invalid run ID %q", id)
+	}
 	runDir, err := o.Store.Ensure(id)
 	if err != nil {
 		return result, err
@@ -401,6 +407,22 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 	_ = o.Store.RemoveWorkspace(id)
 	result.Metadata = metadata
 	return result, nil
+}
+
+func validRunID(id string) bool {
+	if len(id) == 0 || len(id) > 64 {
+		return false
+	}
+	for _, character := range id {
+		if (character >= 'a' && character <= 'z') ||
+			(character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') ||
+			character == '-' || character == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func summarizeTask(task string) string {

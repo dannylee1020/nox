@@ -125,6 +125,27 @@ func TestCloneAtAndPublishPreserveSourceCheckout(t *testing.T) {
 	}
 }
 
+type pushRunner struct {
+	command execx.Command
+}
+
+func (r *pushRunner) Run(_ context.Context, command execx.Command) (execx.Result, error) {
+	r.command = command
+	return execx.Result{ExitCode: 0}, nil
+}
+
+func TestPushUsesNamedRemoteBranch(t *testing.T) {
+	runner := &pushRunner{}
+	if err := (Git{Runner: runner}).Push(context.Background(), "/tmp/repo", "origin", "nox/run-1"); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(runner.command.Args, " ")
+	want := "push origin refs/heads/nox/run-1:refs/heads/nox/run-1"
+	if got != want {
+		t.Fatalf("push args = %q, want %q", got, want)
+	}
+}
+
 func TestPublishRejectsExistingBranch(t *testing.T) {
 	ctx := context.Background()
 	source := t.TempDir()

@@ -213,6 +213,30 @@ func TestLaunchAnnouncesReadableRun(t *testing.T) {
 	}
 }
 
+func TestLaunchUsesCallerProvidedRunID(t *testing.T) {
+	source := t.TempDir()
+	initRunFixture(t, source)
+	state := t.TempDir()
+	fake := &fakeDockerRunner{}
+	orchestrator := newTestOrchestrator("no-op")
+	orchestrator.Docker = sandbox.Docker{Runner: fake}
+	result, err := orchestrator.Launch(context.Background(), Config{
+		RunID: "remote-run-123", Repo: source, From: "main", OutputBranch: "nox/remote-run-123",
+		Task: "do nothing", Validation: "true",
+		Network: "none", Image: "nox-runner:v0", StateRoot: state, Timeout: time.Minute,
+		Output: io.Discard, ErrorOutput: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Metadata.RunID != "remote-run-123" {
+		t.Fatalf("run ID = %q", result.Metadata.RunID)
+	}
+	if _, err := store.New(state).ReadMetadata("remote-run-123"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLaunchNoChangesDoesNotPublish(t *testing.T) {
 	source := t.TempDir()
 	initRunFixture(t, source)

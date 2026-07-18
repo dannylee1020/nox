@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/nox-dev/nox/internal/execx"
+	"github.com/nox-dev/nox/internal/remote"
 	"github.com/nox-dev/nox/internal/run"
 	"github.com/nox-dev/nox/internal/sandbox"
 	"github.com/nox-dev/nox/internal/store"
@@ -24,6 +26,7 @@ const usageText = `Nox runs a coding agent inside a local Docker/gVisor sandbox.
 Commands:
   nox watch <run-id>
   nox doctor
+  nox serve
   nox launch --repo . --from main --output-branch nox/change --task "..." --validate "..."
   nox inspect <run-id>
   nox diff <run-id>
@@ -44,6 +47,8 @@ func main() {
 		err = doctor(os.Args[2:])
 	case "launch":
 		err = launch(os.Args[2:])
+	case "serve":
+		err = serve(os.Args[2:])
 	case "inspect":
 		err = inspect(os.Args[2:])
 	case "diff":
@@ -80,6 +85,67 @@ func doctor(args []string) error {
 	}
 	fmt.Printf("ok: Docker can run %s with runsc\n", *image)
 	return nil
+}
+
+func serve(args []string) error {
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	listen := fs.String("listen", getenv("NOX_LISTEN_ADDR", "127.0.0.1:8080"), "HTTP listen address")
+	stateRoot := fs.String("state-root", getenv("NOX_STATE_ROOT", ""), "remote state directory")
+	githubAPI := fs.String("github-api-url", getenv("NOX_GITHUB_API_URL", "https://api.github.com"), "GitHub API URL")
+	codexHome := fs.String("codex-home", getenv("CODEX_HOME", ""), "host Codex directory")
+	gitName := fs.String("git-name", getenv("NOX_GIT_NAME", "Nox Worker"), "Git author name")
+	gitEmail := fs.String("git-email", getenv("NOX_GIT_EMAIL", "nox@localhost"), "Git author email")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	apiToken := os.Getenv("NOX_API_TOKEN")
+	githubToken := os.Getenv("NOX_GITHUB_TOKEN")
+	if apiToken == "" {
+		return errors.New("NOX_API_TOKEN is required")
+	}
+	if githubToken == "" {
+		return errors.New("NOX_GITHUB_TOKEN is required")
+	}
+	coordinator := remote.NewCoordinator(remote.CoordinatorConfig{
+		StateRoot: *stateRoot, GitHubToken: githubToken, GitHubAPIURL: *githubAPI,
+		CodexHome: *codexHome, GitName: *gitName, GitEmail: *gitEmail,
+	})
+	service, err := remote.NewServer(remote.ServerConfig{APIToken: apiToken, Executor: coordinator})
+	if err != nil {
+		return err
+	}
+	httpServer := &http.Server{
+		Addr:              *listen,
+		Handler:           service.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		<-ctx.Done()
+		shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = httpServer.Shutdown(shutdownContext)
+	}()
+	fmt.Printf("nox serve listening on %s\n", *listen)
+	if err := httpServer.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+func getenv(name, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
 }
 
 func launch(args []string) error {
