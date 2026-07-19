@@ -20,13 +20,12 @@ func TestSubmitUsesRemoteClientWithoutLocalDoctor(t *testing.T) {
 case "$*" in
   "rev-parse --show-toplevel") printf '%%s\n' %q ;;
   "symbolic-ref --quiet --short HEAD") printf 'main\n' ;;
-  "rev-parse --verify main^{commit}") printf '%%s\n' %q ;;
   "status --porcelain --untracked-files=all") ;;
   "config --get remote.origin.url") printf 'git@github.com:acme/demo.git\n' ;;
-  "ls-remote --heads origin refs/heads/main") printf '%%s\trefs/heads/main\n' %q ;;
+  "ls-remote --heads origin refs/heads/release") printf '%%s\trefs/heads/release\n' %q ;;
   *) echo "unexpected git command: $*" >&2; exit 1 ;;
 esac
-`, root, strings.Repeat("a", 40), strings.Repeat("a", 40))
+`, root, strings.Repeat("b", 40))
 	if err := os.WriteFile(fakeGit, []byte(gitScript), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +65,7 @@ esac
 
 	if err := submit([]string{
 		"--repo", root,
-		"--from", "main",
+		"--from", "release",
 		"--title", "remote change",
 		"--task", "task",
 		"--validate", "go test ./...",
@@ -74,7 +73,7 @@ esac
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if submitted.Repository != "acme/demo" || submitted.BaseBranch != "main" || submitted.BaseCommit != strings.Repeat("a", 40) {
+	if submitted.Repository != "acme/demo" || submitted.BaseBranch != "release" || submitted.BaseCommit != strings.Repeat("b", 40) {
 		t.Fatalf("submitted request = %#v", submitted)
 	}
 }

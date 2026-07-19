@@ -38,13 +38,13 @@ When `NOX_REMOTE_URL` is configured, submit through the remote worker instead of
 ```bash
 nox submit \
   --repo <repository-root> \
-  --from <committed-branch> \
+  --from <github-base-branch> \
   --title "<pull-request-title>" \
   --task-file <task-file> \
   --validate <command>
 ```
 
-`nox submit` reads `NOX_API_TOKEN`, verifies that the local branch matches the GitHub `origin`, submits the execution contract, and polls until the worker reports a pull request, no changes, failure, or cancellation. It does not run `nox doctor` locally.
+`nox submit` reads `NOX_API_TOKEN`, resolves the selected branch from GitHub `origin`, submits the pinned commit, and polls until the worker reports a pull request, no changes, failure, or cancellation. Local uncommitted work is ignored. It does not run `nox doctor` locally.
 
 ## Task input contract
 

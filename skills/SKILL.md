@@ -28,13 +28,13 @@ If `NOX_REMOTE_URL` is set, use the remote submission workflow below. Otherwise,
    ```bash
    nox submit \
      --repo <repository-root> \
-     --from <current-branch> \
+     --from <github-base-branch> \
      --title "<pull-request-title>" \
      --task-file <task-file> \
      --validate <validation-command>
    ```
 
-   `nox submit` authenticates with `NOX_API_TOKEN`, verifies that the committed branch matches its GitHub `origin`, submits the job, and polls until the remote worker creates a pull request. Do not construct a curl request or place the API token in the task contract.
+   `nox submit` authenticates with `NOX_API_TOKEN`, resolves the selected branch from GitHub `origin`, submits the pinned commit, and polls until the remote worker creates a pull request. Local uncommitted work is ignored. Do not construct a curl request or place the API token in the task contract.
 
    Local mode (`NOX_REMOTE_URL` is unset):
 

@@ -21,7 +21,7 @@ func submit(args []string) error {
 	fs := flag.NewFlagSet("submit", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	repo := fs.String("repo", ".", "local Git repository")
-	from := fs.String("from", "", "local branch to submit")
+	from := fs.String("from", "", "GitHub base branch to submit")
 	title := fs.String("title", "", "pull request title")
 	task := fs.String("task", "", "agent task")
 	taskFile := fs.String("task-file", "", "file containing the agent task")
@@ -86,14 +86,10 @@ func submit(args []string) error {
 			return err
 		}
 	}
-	baseCommit, err := git.ResolveCommit(ctx, repoRoot, baseBranch)
-	if err != nil {
-		return err
-	}
 	if dirty, dirtyErr := git.Dirty(ctx, repoRoot); dirtyErr != nil {
 		return dirtyErr
 	} else if dirty && !*jsonOutput {
-		fmt.Fprintln(os.Stderr, "warning: uncommitted changes are excluded from the remote run")
+		fmt.Fprintln(os.Stderr, "warning: local uncommitted changes are ignored; remote execution uses GitHub state")
 	}
 	originURL, err := git.RemoteURL(ctx, repoRoot, "origin")
 	if err != nil {
@@ -103,12 +99,9 @@ func submit(args []string) error {
 	if err != nil {
 		return err
 	}
-	remoteCommit, err := git.RemoteBranchCommit(ctx, repoRoot, "origin", baseBranch)
+	baseCommit, err := git.RemoteBranchCommit(ctx, repoRoot, "origin", baseBranch)
 	if err != nil {
-		return fmt.Errorf("verify GitHub base branch: %w", err)
-	}
-	if !strings.EqualFold(baseCommit, remoteCommit) {
-		return fmt.Errorf("local branch %q at %s does not match origin at %s; push the committed branch before submitting", baseBranch, baseCommit, remoteCommit)
+		return fmt.Errorf("resolve GitHub base branch: %w", err)
 	}
 
 	seconds := int((*timeout + time.Second - 1) / time.Second)
