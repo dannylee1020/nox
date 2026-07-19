@@ -1,14 +1,16 @@
 # Nox CLI reference
 
-Nox runs one coding task inside a local Docker/gVisor sandbox and publishes validated changes to a new local branch.
+Nox runs one coding task inside a local or remote Docker/gVisor sandbox and publishes validated changes to a new local branch or pull request.
 
 ## Setup
+
+For local execution, a worker must run:
 
 ```bash
 nox doctor
 ```
 
-`doctor` must pass before launching. Nox requires Docker with the `runsc` runtime and never falls back to `runc`.
+`doctor` must pass before local launching. Remote execution does not require local Docker or `nox doctor`. Nox requires Docker with the `runsc` runtime and never falls back to `runc`.
 
 ## Launch
 
@@ -46,6 +48,13 @@ nox submit \
 
 `nox submit` reads `NOX_API_TOKEN`, resolves the selected branch from GitHub `origin`, submits the pinned commit, and polls until the worker reports a pull request, no changes, failure, or cancellation. Local uncommitted work is ignored. It does not run `nox doctor` locally.
 
+Use `--detach --json` when a parent agent will monitor the run separately:
+
+```bash
+nox submit --detach --json ...
+nox watch --remote <run-id>
+```
+
 ## Task input contract
 
 Nox reads `--task` or `--task-file` on the host. The sandbox agent does not receive the parent conversation automatically.
@@ -57,13 +66,14 @@ For Codex, Nox prepends a deterministic execution envelope containing the resolv
 ## Monitor and inspect
 
 ```bash
-nox watch <run-id>
+nox watch <run-id>                 # local run
+nox watch --remote <run-id>       # remote run
+nox cancel --remote <run-id>      # explicitly cancel remote work
 nox inspect <run-id>
 nox diff <run-id>
-nox runs
 ```
 
-Run state and logs are stored under `~/.nox/runs/<run-id>` by default.
+Stopping `nox watch --remote` does not cancel the server-owned run. Run state and logs for local runs are stored under `~/.nox/runs/<run-id>` by default; remote details remain on the worker.
 
 ## Result contract
 

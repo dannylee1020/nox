@@ -29,6 +29,7 @@ func submit(args []string) error {
 	network := fs.String("network", "online", "network mode: online or none")
 	timeout := fs.Duration("timeout", 2*time.Hour, "maximum remote run duration")
 	pollInterval := fs.Duration("poll-interval", 2*time.Second, "remote status polling interval")
+	detach := fs.Bool("detach", false, "return after the remote run is accepted")
 	jsonOutput := fs.Bool("json", false, "emit one JSON result")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -117,6 +118,13 @@ func submit(args []string) error {
 	})
 	if err != nil {
 		return err
+	}
+	if *detach {
+		if *jsonOutput {
+			return printSubmitJSON(status)
+		}
+		fmt.Fprintf(os.Stdout, "submitted remote run: %s\n", status.RunID)
+		return nil
 	}
 	if !*jsonOutput {
 		fmt.Fprintf(os.Stderr, "submitted remote run: %s\n", status.RunID)

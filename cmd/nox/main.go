@@ -24,7 +24,8 @@ import (
 const usageText = `Nox runs coding agents inside local or remote Docker/gVisor sandboxes.
 
 Commands:
-  nox watch <run-id>
+  nox watch [--remote] <run-id>
+  nox cancel --remote <run-id>
   nox doctor
   nox serve
   nox launch --repo . --from main --output-branch nox/change --task "..." --validate "..."
@@ -44,6 +45,8 @@ func main() {
 	switch os.Args[1] {
 	case "watch":
 		err = watch(os.Args[2:])
+	case "cancel":
+		err = cancelRun(os.Args[2:])
 	case "doctor":
 		err = doctor(os.Args[2:])
 	case "launch":

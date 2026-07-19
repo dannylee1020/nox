@@ -95,7 +95,13 @@ export NOX_REMOTE_URL=https://nox.internal.example
 export NOX_API_TOKEN=<private-api-token>
 ```
 
-When the user invokes `$nox`, the skill runs `nox submit`, which verifies the current GitHub branch, sends the execution contract, polls the worker, and reports the pull request URL. The client does not require local Docker or `nox doctor`.
+When the user invokes `$nox`, the skill runs `nox submit --detach`, returns the run ID, and starts a background monitor with `nox watch --remote`. The monitor reports the pull request URL when complete. The client does not require local Docker or `nox doctor`.
+
+Cancel an active remote run explicitly with:
+
+```bash
+nox cancel --remote <run-id>
+```
 
 ## Direct API
 

@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nox-dev/nox/internal/remote"
 	"github.com/nox-dev/nox/internal/store"
 )
 
@@ -19,6 +20,7 @@ func watch(args []string) error {
 	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	stateRoot := fs.String("state-root", "", "run state directory")
+	remoteMode := fs.Bool("remote", false, "watch a remote run using NOX_REMOTE_URL")
 	interval := fs.Duration("interval", 500*time.Millisecond, "metadata and log polling interval")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -27,11 +29,24 @@ func watch(args []string) error {
 		return err
 	}
 	if len(fs.Args()) != 1 {
-		return errors.New("usage: nox watch [--state-root <dir>] <run-id>")
+		return errors.New("usage: nox watch [--remote|--state-root <dir>] <run-id>")
+	}
+	if *remoteMode && *stateRoot != "" {
+		return errors.New("use either --remote or --state-root, not both")
 	}
 	if *interval <= 0 {
 		return errors.New("watch interval must be positive")
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if *remoteMode {
+		client, err := remote.NewClient(os.Getenv("NOX_REMOTE_URL"), os.Getenv("NOX_API_TOKEN"), nil)
+		if err != nil {
+			return err
+		}
+		return watchRemoteRun(ctx, client, fs.Arg(0), *interval, os.Stdout, os.Stderr)
+	}
+
 	var st store.Store
 	if *stateRoot == "" {
 		var err error
@@ -42,9 +57,48 @@ func watch(args []string) error {
 	} else {
 		st = store.New(*stateRoot)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	return watchRun(ctx, st, fs.Arg(0), *interval, os.Stdout, os.Stderr)
+}
+
+func watchRemoteRun(ctx context.Context, client *remote.Client, id string, interval time.Duration, output, status io.Writer) error {
+	if strings.TrimSpace(id) == "" {
+		return errors.New("run id is required")
+	}
+	current, err := client.Status(ctx, id)
+	if err != nil {
+		return err
+	}
+	lastState := ""
+	final, err := client.Wait(ctx, current, interval, func(next remote.RunStatus) {
+		if next.State == lastState {
+			return
+		}
+		lastState = next.State
+		_, _ = fmt.Fprintf(status, "run %s: %s\n", next.RunID, next.State)
+	})
+	if errors.Is(err, context.Canceled) {
+		_, _ = fmt.Fprintf(status, "stopped watching remote run %s; the run continues\n", id)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return writeRemoteResult(output, final)
+}
+
+func writeRemoteResult(output io.Writer, status remote.RunStatus) error {
+	if status.State == remote.StateCompleted {
+		if status.PullRequestURL == "" {
+			return errors.New("remote run completed without a pull request URL")
+		}
+		_, err := fmt.Fprintf(output, "pull request: %s\n", status.PullRequestURL)
+		return err
+	}
+	if status.State == remote.StateNoChanges {
+		_, err := fmt.Fprintf(output, "remote run %s made no changes\n", status.RunID)
+		return err
+	}
+	return submitStatusError(status)
 }
 
 func watchRun(ctx context.Context, st store.Store, id string, interval time.Duration, output, status io.Writer) error {

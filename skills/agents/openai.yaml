@@ -1,7 +1,7 @@
 interface:
   display_name: Nox
   short_description: Delegate coding work to an isolated Nox sandbox
-  default_prompt: Run this task through Nox and report the result branch or pull request.
+  default_prompt: Dispatch this task through Nox asynchronously and report the run ID and result branch or pull request.
 
 policy:
   allow_implicit_invocation: false

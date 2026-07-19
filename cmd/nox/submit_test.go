@@ -50,11 +50,6 @@ esac
 				t.Fatal(err)
 			}
 			writeSubmitTestJSON(w, http.StatusAccepted, map[string]any{"runId": "run-1", "state": "queued"})
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/run-1":
-			writeSubmitTestJSON(w, http.StatusOK, map[string]any{
-				"runId": "run-1", "state": "completed", "branch": "nox/run-1",
-				"commit": "b", "pullRequestUrl": "https://github.com/acme/demo/pull/1",
-			})
 		default:
 			http.NotFound(w, r)
 		}
@@ -69,7 +64,7 @@ esac
 		"--title", "remote change",
 		"--task", "task",
 		"--validate", "go test ./...",
-		"--poll-interval", "1ms",
+		"--detach",
 	}); err != nil {
 		t.Fatal(err)
 	}
