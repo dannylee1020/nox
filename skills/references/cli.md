@@ -75,6 +75,17 @@ nox diff <run-id>
 
 Stopping `nox watch --remote` does not cancel the server-owned run. Run state and logs for local runs are stored under `~/.nox/runs/<run-id>` by default; remote details remain on the worker.
 
+## Skill status command
+
+`$nox status` is a conversational skill command, not a Nox CLI subcommand:
+
+```text
+$nox status            # every active task in the current thread
+$nox status <run-id>   # one tracked task
+```
+
+The skill asks each running Nox worker for a non-disruptive point-in-time report and returns fixed fields for the worker, run state, current activity, monitor, result, validation, blocker, and evidence. If no task remains active, the unqualified command reports the most recently dispatched task. It never launches, interrupts, cancels, or cleans up work. Local status is corroborated with `nox inspect`; remote status comes from the existing `nox watch --remote` monitor.
+
 ## Result contract
 
 A successful launch:

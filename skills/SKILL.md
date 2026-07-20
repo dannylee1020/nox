@@ -1,11 +1,51 @@
 ---
 name: nox
-description: Delegate a coding task through Nox in an isolated sandbox. Run locally or submit to the configured remote Docker/gVisor worker, validate it, and publish successful changes to a local branch or pull request. Use only when the user explicitly invokes $nox or asks to delegate a coding task through Nox.
+description: Delegate a coding task through Nox in an isolated sandbox or report the status of Nox tasks already dispatched in the current thread. Run locally or submit to the configured remote Docker/gVisor worker, validate it, and publish successful changes to a local branch or pull request. Use only when the user explicitly invokes $nox, asks to delegate a coding task through Nox, or asks for Nox task status.
 ---
 
 # Nox sandbox execution
 
 Use Nox when the user explicitly asks for sandboxed execution. Do not launch Nox merely because a task could benefit from isolation.
+
+## Commands
+
+- `$nox status` reports all active Nox tasks dispatched in the current thread. If none remain active, it reports the most recently dispatched task.
+- `$nox status <run-id>` reports only the matching task. If the run ID is not tracked in the current thread, report that without selecting another task.
+- Any other explicit Nox invocation follows the dispatch workflow below.
+
+A status request is read-only. Route it through the status workflow and return without hydrating a task contract, running `nox doctor`, launching, submitting, cancelling, cleaning up, or otherwise changing a task.
+
+## Status workflow
+
+1. Identify Nox workers spawned by the current thread from recorded dispatch context and unique worker names beginning with `nox_`. Do not include unrelated subagents or infer tasks from other threads.
+2. For `$nox status`, select every active Nox worker. If none are active, select the most recently dispatched Nox worker. For `$nox status <run-id>`, select only the worker associated with that exact run ID.
+3. Inspect the selected workers without interrupting them. Use their terminal result directly when completed. For each running worker, send this non-disruptive message with `send_message`:
+
+   ```text
+   Status check only: report the current command or process, execution mode, doctor result when applicable, run ID, raw Nox state, current activity, monitoring source or session, result branch/commit or pull request, validation state, blocker, and evidence location. Continue the assigned execution unchanged.
+   ```
+
+4. Send all worker probes before waiting, then collect replies only until a shared 10-second deadline. Never use `interrupt_agent`, restart a completed worker, or take ownership of its foreground command. If a worker does not reply, use its last known state and label the information as last-known.
+5. Corroborate a local run with read-only `nox inspect <run-id>`. For a remote run, use the monitor worker's latest `nox watch --remote` state. Do not construct direct API requests, expose `NOX_API_TOKEN`, or run local Docker commands for remote status.
+6. Keep worker state and raw Nox run state separate. Prefer Nox metadata for local lifecycle/result fields and the worker report for its current command and monitoring session. If sources differ, report both without guessing.
+7. Return tasks newest-first using every field in this fixed Markdown shape. Use `unknown`, `pending`, `none`, `not published`, or `unavailable` rather than omitting a field:
+
+   ```markdown
+   ## Nox status
+
+   ### <run-id or pending>
+   - Mode: <local|remote|unknown>
+   - Worker: <thread identifier> — <running|completed|failed|missing>
+   - Run: <run-id or pending> — <raw Nox state or unknown>
+   - Current activity: <activity or unknown>
+   - Monitoring: <foreground launch|remote watch|last-known|none>
+   - Result: <branch and commit|pull request|no changes|not published|pending>
+   - Validation: <not started|pending|running|passed|failed>
+   - Blocker: <concise error|none|unknown>
+   - Evidence: <local run directory|pull request URL|unavailable>
+   ```
+
+If there are no Nox tasks in the current thread, say so concisely. Do not return raw logs or secrets in a status response.
 
 If `NOX_REMOTE_URL` is set, use the remote submission workflow below. Otherwise, use the local workflow.
 
@@ -21,7 +61,7 @@ If `NOX_REMOTE_URL` is set, use the remote submission workflow below. Otherwise,
 8. Use the user's validation command when provided. If it is omitted, inspect repository-native validation commands and choose one only when the correct command is unambiguous; otherwise ask the user.
 9. Write the hydrated contract to a private task file under the writable system temporary directory, such as `${TMPDIR:-/tmp}/nox/tasks/<task-id>.md`, including the validation command under `Validation > Commands`. Use user-only directory and file permissions (`0700` and `0600`) and keep the file until the delegated run reaches a terminal state. Do not write it into the user's repository or request extra filesystem access for it.
 10. Choose a concise pull-request title from the user's requested change.
-11. Do not run the long-lived execution command in the main thread. Use one background Codex worker subagent per Nox task.
+11. Do not run the long-lived execution command in the main thread. Use one background Codex worker subagent per Nox task. Give each worker a unique task name beginning with `nox_`, record its worker identifier and execution mode in the dispatch response, and require it to answer the status message above without changing its assigned execution.
 
    Remote mode (`NOX_REMOTE_URL` is set):
 
@@ -37,7 +77,7 @@ If `NOX_REMOTE_URL` is set, use the remote submission workflow below. Otherwise,
      --validate <validation-command>
    ```
 
-   Then spawn the background worker subagent with only the returned run ID. It runs:
+   Then spawn the background worker subagent with only the returned run ID. Record the run ID with the worker identifier. It runs:
 
    ```bash
    nox watch --remote <run-id>
@@ -87,6 +127,7 @@ If `NOX_REMOTE_URL` is set, use the remote submission workflow below. Otherwise,
 - Codex runs autonomously inside the disposable sandbox; the original checkout is not mounted or modified.
 - Nox creates the host-side result commit only after validation succeeds.
 - The main thread must not wait on the long-lived local launch or remote monitor subagent.
+- Status requests observe existing work only. They never interrupt, reactivate, cancel, resubmit, clean up, or start a Nox task.
 - Never use shell backgrounding or a wrapper timeout shorter than Nox's execution deadline and teardown grace.
 - Worker subagents execute or monitor only; they do not rehydrate, resubmit, merge, switch branches, or clean up evidence.
 - Do not invoke `nox cleanup` automatically; failed workspaces and logs may be needed as evidence.
