@@ -19,6 +19,8 @@ type fakeDockerRunner struct {
 	volumePath string
 	removed    bool
 	agentDone  bool
+	setupRuns  int
+	setupCode  int
 }
 
 type testAdapter struct {
@@ -81,6 +83,17 @@ func (f *fakeDockerRunner) Stream(_ context.Context, command execx.Command, stdo
 	joined := strings.Join(command.Args, " ")
 	if strings.Contains(joined, "git config --global") {
 		return execx.Result{ExitCode: 0}, nil
+	}
+	if strings.Contains(joined, "test -f /workspace/.nox/setup.sh") {
+		if _, err := os.Stat(filepath.Join(f.volumePath, ".nox", "setup.sh")); err != nil {
+			return execx.Result{ExitCode: 1}, nil
+		}
+		return execx.Result{ExitCode: 0}, nil
+	}
+	if strings.Contains(joined, "sh /workspace/.nox/setup.sh") {
+		f.setupRuns++
+		_, _ = io.WriteString(stdout, "setup ok\n")
+		return execx.Result{ExitCode: f.setupCode}, nil
 	}
 	if strings.Contains(joined, " false") {
 		return execx.Result{ExitCode: 1}, nil
@@ -177,6 +190,66 @@ func TestLaunchPublishesValidatedLocalBranchAndTearsDown(t *testing.T) {
 	current := assertGit(t, source, "branch", "--show-current")
 	if current != "main" {
 		t.Fatalf("current branch changed to %q", current)
+	}
+}
+
+func TestLaunchRunsRepositorySetupBeforeAgent(t *testing.T) {
+	source := t.TempDir()
+	initRunFixture(t, source)
+	addSetupFixture(t, source)
+	state := t.TempDir()
+	fake := &fakeDockerRunner{}
+	orchestrator := newTestOrchestrator("no-op")
+	orchestrator.Docker = sandbox.Docker{Runner: fake}
+	result, err := orchestrator.Launch(context.Background(), Config{
+		RunID: "setup-success", Repo: source, From: "main", OutputBranch: "nox/setup-success",
+		Task: "verify setup", Validation: "true",
+		Network: "none", Image: "nox-runner:v0", StateRoot: state, Timeout: time.Minute,
+		Output: io.Discard, ErrorOutput: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fake.setupRuns != 1 || !fake.agentDone {
+		t.Fatalf("setup runs = %d, agent done = %t", fake.setupRuns, fake.agentDone)
+	}
+	if !result.NoChanges {
+		t.Fatal("expected no changes")
+	}
+	data, err := os.ReadFile(filepath.Join(state, "setup-success", "setup.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "setup ok") {
+		t.Fatalf("setup log = %q", data)
+	}
+}
+
+func TestLaunchStopsWhenRepositorySetupFails(t *testing.T) {
+	source := t.TempDir()
+	initRunFixture(t, source)
+	addSetupFixture(t, source)
+	state := t.TempDir()
+	fake := &fakeDockerRunner{setupCode: 23}
+	orchestrator := newTestOrchestrator("no-op")
+	orchestrator.Docker = sandbox.Docker{Runner: fake}
+	result, err := orchestrator.Launch(context.Background(), Config{
+		RunID: "setup-failure", Repo: source, From: "main", OutputBranch: "nox/setup-failure",
+		Task: "verify setup failure", Validation: "true",
+		Network: "none", Image: "nox-runner:v0", StateRoot: state, Timeout: time.Minute,
+		Output: io.Discard, ErrorOutput: io.Discard,
+	})
+	if err == nil || !strings.Contains(err.Error(), "repository setup exited with code 23") {
+		t.Fatalf("setup error = %v", err)
+	}
+	if fake.setupRuns != 1 || fake.agentDone {
+		t.Fatalf("setup runs = %d, agent done = %t", fake.setupRuns, fake.agentDone)
+	}
+	if result.Metadata.State != store.StateFailed || !result.Metadata.Retained {
+		t.Fatalf("metadata = %#v", result.Metadata)
+	}
+	if branch := assertGit(t, source, "show-ref", "--verify", "--quiet", "refs/heads/nox/setup-failure"); branch != "" {
+		t.Fatalf("unexpected branch output: %q", branch)
 	}
 }
 
@@ -298,6 +371,19 @@ func initRunFixture(t *testing.T, dir string) {
 	}
 	assertGit(t, dir, "add", "README.md")
 	assertGit(t, dir, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "base")
+}
+
+func addSetupFixture(t *testing.T, dir string) {
+	t.Helper()
+	setupDir := filepath.Join(dir, ".nox")
+	if err := os.MkdirAll(setupDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(setupDir, "setup.sh"), []byte("#!/bin/sh\nset -eu\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	assertGit(t, dir, "add", ".nox/setup.sh")
+	assertGit(t, dir, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "add setup")
 }
 
 func assertGit(t *testing.T, dir string, args ...string) string {

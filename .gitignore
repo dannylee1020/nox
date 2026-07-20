@@ -1,5 +1,6 @@
-# Nox run state
-.nox/
+# Nox run state; repositories may track their sandbox setup contract.
+.nox/*
+!.nox/setup.sh
 
 # Go
 /bin/

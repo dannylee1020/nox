@@ -14,6 +14,7 @@ const (
 	StateInitializing State = "initializing"
 	StateCloning      State = "cloning"
 	StateStarting     State = "starting"
+	StateSettingUp    State = "setting_up"
 	StateAgentRunning State = "agent_running"
 	StateValidating   State = "validating"
 	StatePublishing   State = "publishing"

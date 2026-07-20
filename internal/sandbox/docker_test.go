@@ -83,7 +83,7 @@ func TestCreateUsesRunscAndMinimumGuardrails(t *testing.T) {
 	for _, want := range []string{
 		"create", "--runtime runsc", "--user 0:0",
 		"--security-opt no-new-privileges:true", "--network bridge", "--pids-limit 256",
-		"type=volume,src=nox-abc123-workspace,dst=/workspace", "type=volume,src=nox-abc123-codex,dst=/home/nox/.codex-ro,readonly",
+		"type=volume,src=nox-abc123-workspace,dst=/workspace", "type=volume,src=nox-abc123-codex,dst=/home/nox/.codex,volume-nocopy",
 		"--tmpfs /tmp:rw,exec,nosuid,size=256m", "--tmpfs /var/tmp:rw,exec,nosuid,size=512m",
 	} {
 		if !strings.Contains(args, want) {
@@ -92,6 +92,40 @@ func TestCreateUsesRunscAndMinimumGuardrails(t *testing.T) {
 	}
 	if strings.Contains(args, "--privileged") || strings.Contains(args, "--cap-add") || strings.Contains(args, "--cap-drop") || strings.Contains(args, "--network host") || strings.Contains(args, "docker.sock") {
 		t.Fatalf("forbidden guardrail in args: %s", args)
+	}
+	if strings.Contains(args, ".codex-ro") || strings.Contains(args, "dst=/home/nox/.codex,readonly") {
+		t.Fatalf("Codex credentials must not be mounted before repository setup: %s", args)
+	}
+}
+
+func TestRepositorySetupProtectsWorkspace(t *testing.T) {
+	fake := &fakeRunner{}
+	_, err := (Docker{Runner: fake}).RunRepositorySetup(context.Background(), Container{ID: "container-id"}, io.Discard, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(fake.commands[0].Args, " ")
+	for _, want := range []string{"sh /workspace/.nox/setup.sh", "git status --porcelain --untracked-files=all", "git rev-parse HEAD", "repository setup changed tracked or non-ignored workspace files", "exit 86"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("setup command missing %q: %s", want, args)
+		}
+	}
+}
+
+func TestPrepareCodexHomeCopiesCredentialsIntoWritableVolume(t *testing.T) {
+	fake := &fakeRunner{}
+	err := (Docker{Runner: fake}).PrepareCodexHome(context.Background(), Container{ID: "container-id"}, "/host/codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.commands) != 2 {
+		t.Fatalf("commands = %d, want two", len(fake.commands))
+	}
+	if got := strings.Join(fake.commands[0].Args, " "); got != "cp /host/codex/. container-id:/home/nox/.codex" {
+		t.Fatalf("copy command = %q", got)
+	}
+	if got := strings.Join(fake.commands[1].Args, " "); !strings.Contains(got, "exec -i container-id chown -R 1000:1000 /home/nox/.codex") {
+		t.Fatalf("ownership command = %q", got)
 	}
 }
 

@@ -94,7 +94,7 @@ nox launch \
   --network online
 ```
 
-Nox stages `~/.codex` into a read-only per-run volume and gives Codex a disposable writable home. Select another host directory with `--codex-home /path/to/codex-home`.
+Nox copies `~/.codex` into a disposable per-run volume after repository setup succeeds. Select another host directory with `--codex-home /path/to/codex-home`.
 
 After installing the skill, use the skill directly:
 
@@ -111,9 +111,10 @@ Each launch:
 1. Resolves `--from` to an exact committed SHA. Uncommitted source changes are excluded with a warning.
 2. Clones that commit without local hardlinks into `~/.nox/runs/<run-id>/workspace`.
 3. Copies the clone into a VM-native Docker volume and starts an isolated `runsc` container.
-4. Runs the agent, then the required `--validate` command in the same container.
-5. Exports the workspace, reconstructs it in a separate host clone, and creates one host-generated squashed commit on the requested local branch.
-6. Removes the container and volumes. Successful workspaces are removed; failed workspaces and logs are retained for inspection.
+4. Runs an optional tracked `.nox/setup.sh`, then copies Codex credentials into the container.
+5. Runs the agent, then the required `--validate` command in the same container.
+6. Exports the workspace, reconstructs it in a separate host clone, and creates one host-generated squashed commit on the requested local branch.
+7. Removes the container and volumes. Successful workspaces are removed; failed workspaces and logs are retained for inspection.
 
 No branch is created if there are no changes or if the agent, validation, export, cancellation, timeout, or branch-collision path fails.
 
@@ -142,9 +143,13 @@ The agent and validation container uses:
 - CPU, memory, and PID limits
 - No host networking, published ports, or Docker socket
 - An isolated VM-native workspace volume
-- An optional read-only Codex source volume and disposable writable Codex home
+- An optional disposable Codex home populated only after repository setup
 
 Short-lived `runsc` helper containers transfer files to and from VM-native volumes. They have no network access and do not run the agent.
+
+### Repository setup
+
+Repositories may track `.nox/setup.sh` to install their own toolchain and dependencies. Nox runs it as root inside the same disposable `runsc` container used by the agent and validation, before copying Codex credentials. Installs must use persistent container paths; shell-only environment changes do not carry into later commands. Setup uses the launch network policy, writes `setup.log`, and fails the run if it changes tracked or non-ignored workspace files.
 
 Network policy is coarse in v0:
 
@@ -155,13 +160,13 @@ Network policy is coarse in v0:
 
 ### Credential warning
 
-Online sandbox code can read staged Codex credentials and may exfiltrate them. Nox copies the host Codex directory into a read-only source volume, then runs Codex from a disposable writable copy. Codex's internal sandbox is bypassed because `runsc` is the outer boundary; never use this adapter without the Nox sandbox.
+Online sandbox code can read staged Codex credentials and may exfiltrate them. Repository setup runs before credentials are copied, but it executes as root and can modify the later runtime; only use setup scripts you trust. Codex's internal sandbox is bypassed because `runsc` is the outer boundary; never use this adapter without the Nox sandbox.
 
 Nox v0 does not broker credentials or filter domains and metadata services. Use disposable credentials and non-sensitive repositories for untrusted code.
 
 ## Runs and commands
 
-Run state lives under `~/.nox/runs/<run-id>` and may contain metadata, `agent.log`, `validation.log`, a patch, and a retained failed workspace. Active workspace and Codex data live in labeled Docker volumes removed during teardown. Use `nox watch <run-id>` to follow state transitions and logs from another terminal. E2E evidence is stored separately under `~/.nox/evidence/v0/`.
+Run state lives under `~/.nox/runs/<run-id>` and may contain metadata, `setup.log`, `agent.log`, `validation.log`, a patch, and a retained failed workspace. Active workspace and Codex data live in labeled Docker volumes removed during teardown. Use `nox watch <run-id>` to follow state transitions and logs from another terminal. E2E evidence is stored separately under `~/.nox/evidence/v0/`.
 
 Published result commits use the effective `user.name` and `user.email` from the source repository. Nox fails before sandbox startup if either identity is not configured.
 
@@ -224,3 +229,5 @@ go test -tags=integration -v ./...
 ```
 
 These tests are skipped unless `NOX_RUNSC_INTEGRATION=1` is set. They cover the `runsc` image smoke test and a real Nox launch using VM-native workspace storage. A skipped test does not prove that `runsc` works.
+
+To verify this repository's networked Go setup and race toolchain inside `runsc`, run `NOX_GO_SETUP_INTEGRATION=1 go test -tags=integration -run '^TestRepositoryGoSetup$' -v ./internal/integration`.

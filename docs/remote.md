@@ -1,6 +1,6 @@
 # Self-hosted remote execution
 
-Remote mode runs a trusted Nox API on one private Linux VM. Each request creates an ephemeral Docker/gVisor (`runsc`) sandbox, runs Codex and validation, then creates a GitHub pull request for validated changes.
+Remote mode runs a trusted Nox API on one private Linux VM. Each request creates an ephemeral Docker/gVisor (`runsc`) sandbox, runs the repository's optional `.nox/setup.sh`, Codex, and validation, then creates a GitHub pull request for validated changes.
 
 ```text
 private client

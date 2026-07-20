@@ -12,11 +12,15 @@ import (
 
 func TestWatchFollowsLifecycleAndLogs(t *testing.T) {
 	st := store.New(t.TempDir())
-	metadata := store.Metadata{RunID: "watch123", State: store.StateAgentRunning, StartedAt: time.Now()}
+	metadata := store.Metadata{RunID: "watch123", State: store.StateSettingUp, StartedAt: time.Now()}
 	if err := st.WriteMetadata(metadata); err != nil {
 		t.Fatal(err)
 	}
 	go func() {
+		time.Sleep(20 * time.Millisecond)
+		_ = st.WriteText(metadata.RunID, "setup.log", "setup output\n")
+		metadata.State = store.StateAgentRunning
+		_ = st.WriteMetadata(metadata)
 		time.Sleep(20 * time.Millisecond)
 		_ = st.WriteText(metadata.RunID, "agent.log", "agent output\n")
 		metadata.State = store.StateValidating
@@ -36,12 +40,12 @@ func TestWatchFollowsLifecycleAndLogs(t *testing.T) {
 	if err := watchRun(ctx, st, metadata.RunID, 5*time.Millisecond, &output, &status); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"agent output", "validation output"} {
+	for _, want := range []string{"setup output", "agent output", "validation output"} {
 		if !strings.Contains(output.String(), want) {
 			t.Errorf("watch output missing %q: %s", want, output.String())
 		}
 	}
-	for _, want := range []string{"agent_running", "validating", "teardown", "completed"} {
+	for _, want := range []string{"setting_up", "agent_running", "validating", "teardown", "completed"} {
 		if !strings.Contains(status.String(), want) {
 			t.Errorf("watch status missing %q: %s", want, status.String())
 		}

@@ -298,15 +298,13 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 		return fail(err)
 	}
 	if adapter.Name() == "codex" {
+		// Mount an empty writable home now; credentials are copied only after repository setup succeeds.
 		codexVolume, err = o.Docker.CreateCodexVolume(ctx, id)
 		if err != nil {
 			return fail(err)
 		}
 		metadata.CodexVolume = codexVolume
 		_ = o.Store.WriteMetadata(metadata)
-		if err := o.Docker.SeedCodexHome(ctx, codexVolume, codexHome, config.Image, id); err != nil {
-			return fail(err)
-		}
 	}
 
 	// create the isolated runsc container.
@@ -328,8 +326,36 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 	if err := o.Docker.PrepareWorkspace(ctx, container); err != nil {
 		return fail(err)
 	}
+	hasSetup, err := o.Docker.HasRepositorySetup(ctx, container)
+	if err != nil {
+		return fail(err)
+	}
+	if hasSetup {
+		setupLog, openErr := o.Store.OpenLog(id, "setup.log")
+		if openErr != nil {
+			return fail(openErr)
+		}
+		if err := writeState(store.StateSettingUp); err != nil {
+			_ = setupLog.Close()
+			return fail(err)
+		}
+		setupOut := io.MultiWriter(setupLog, config.Output)
+		setupResult, setupErr := o.Docker.RunRepositorySetup(ctx, container, setupOut, setupLog)
+		closeErr := setupLog.Close()
+		if setupErr != nil || setupResult.ExitCode != 0 {
+			if setupErr != nil {
+				setupErr = fmt.Errorf("repository setup failed with code %d: %w", setupResult.ExitCode, setupErr)
+			} else {
+				setupErr = fmt.Errorf("repository setup exited with code %d", setupResult.ExitCode)
+			}
+			return fail(setupErr)
+		}
+		if closeErr != nil {
+			return fail(fmt.Errorf("close setup log: %w", closeErr))
+		}
+	}
 	if codexVolume != "" {
-		if err := o.Docker.PrepareCodexHome(ctx, container); err != nil {
+		if err := o.Docker.PrepareCodexHome(ctx, container, codexHome); err != nil {
 			return fail(err)
 		}
 	}

@@ -135,7 +135,7 @@ func (d Docker) Create(ctx context.Context, config Config) (Container, error) {
 		"--tmpfs", "/var/tmp:rw,exec,nosuid,size=512m",
 	}
 	if config.CodexHomeVolume != "" {
-		args = append(args, "--mount", "type=volume,src="+config.CodexHomeVolume+",dst=/home/nox/.codex-ro,readonly")
+		args = append(args, "--mount", "type=volume,src="+config.CodexHomeVolume+",dst=/home/nox/.codex,volume-nocopy")
 	}
 	keys := make([]string, 0, len(config.Environment))
 	for key := range config.Environment {
@@ -159,10 +159,6 @@ func (d Docker) Create(ctx context.Context, config Config) (Container, error) {
 
 func (d Docker) SeedWorkspace(ctx context.Context, volume, source, image, runID string) error {
 	return d.seedDirectory(ctx, volume, source, image, runID, "workspace")
-}
-
-func (d Docker) SeedCodexHome(ctx context.Context, volume, source, image, runID string) error {
-	return d.seedDirectory(ctx, volume, source, image, runID, "codex")
 }
 
 func (d Docker) seedDirectory(ctx context.Context, volume, source, image, runID, kind string) (err error) {
@@ -256,10 +252,46 @@ func (d Docker) PrepareWorkspace(ctx context.Context, container Container) error
 	return nil
 }
 
-func (d Docker) PrepareCodexHome(ctx context.Context, container Container) error {
-	_, err := d.Exec(ctx, container, []string{"sh", "-lc", "cp -a /home/nox/.codex-ro/. /home/nox/.codex/"}, nil, io.Discard, io.Discard)
+func (d Docker) HasRepositorySetup(ctx context.Context, container Container) (bool, error) {
+	result, err := d.Exec(ctx, container, []string{"test", "-f", "/workspace/.nox/setup.sh"}, nil, io.Discard, io.Discard)
+	if err == nil && result.ExitCode == 0 {
+		return true, nil
+	}
+	if result.ExitCode == 1 {
+		return false, nil
+	}
 	if err != nil {
-		return fmt.Errorf("prepare writable Codex home: %w", err)
+		return false, fmt.Errorf("inspect repository setup: %w", err)
+	}
+	return false, fmt.Errorf("inspect repository setup exited with code %d", result.ExitCode)
+}
+
+func (d Docker) RunRepositorySetup(ctx context.Context, container Container, stdout, stderr io.Writer) (execx.Result, error) {
+	const command = `set +e
+before="$(git status --porcelain --untracked-files=all)"
+before_head="$(git rev-parse HEAD)"
+sh /workspace/.nox/setup.sh
+setup_status=$?
+after="$(git status --porcelain --untracked-files=all)"
+after_head="$(git rev-parse HEAD)"
+if [ "$before" != "$after" ] || [ "$before_head" != "$after_head" ]; then
+  printf '%s\n' 'repository setup changed tracked or non-ignored workspace files' >&2
+  git status --short --untracked-files=all >&2
+  exit 86
+fi
+exit "$setup_status"`
+	return d.Exec(ctx, container, []string{"sh", "-lc", command}, nil, stdout, stderr)
+}
+
+func (d Docker) PrepareCodexHome(ctx context.Context, container Container, source string) error {
+	if strings.TrimSpace(source) == "" {
+		return fmt.Errorf("Codex home source is required")
+	}
+	if _, err := d.Runner.Run(ctx, execx.Command{Name: "docker", Args: []string{"cp", source + string(os.PathSeparator) + ".", container.ID + ":/home/nox/.codex"}}); err != nil {
+		return fmt.Errorf("copy Codex home: %w", err)
+	}
+	if _, err := d.Exec(ctx, container, []string{"chown", "-R", "1000:1000", "/home/nox/.codex"}, nil, io.Discard, io.Discard); err != nil {
+		return fmt.Errorf("set Codex home ownership: %w", err)
 	}
 	return nil
 }

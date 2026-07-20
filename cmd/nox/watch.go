@@ -124,7 +124,7 @@ func watchRun(ctx context.Context, st store.Store, id string, interval time.Dura
 			}
 			lastState = metadata.State
 		}
-		for _, name := range []string{"agent.log", "validation.log"} {
+		for _, name := range []string{"setup.log", "agent.log", "validation.log"} {
 			if err := tailLog(st.RunDir(id)+string(os.PathSeparator)+name, name, offsets, headers, output); err != nil {
 				return err
 			}

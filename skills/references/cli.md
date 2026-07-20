@@ -90,6 +90,7 @@ The skill asks each running Nox worker for a non-disruptive point-in-time report
 
 A successful launch:
 
+- runs the repository's optional `.nox/setup.sh` before staging Codex credentials;
 - runs the agent and validation inside the same `runsc` container;
 - creates one host-side squashed commit on the requested local branch;
 - preserves the source checkout's branch, HEAD, and dirty changes;
