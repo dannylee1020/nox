@@ -477,6 +477,7 @@ print_local_summary() {
 Nox local CLI, Docker/gVisor backend, and Codex skill are installed.
 CLI: $PREFIX/nox
 Skill: $CODEX_SKILLS_DIR/nox
+Restart Codex before using \$nox; local runs request scoped Docker access.
 EOF
 
 	case ":${PATH}:" in

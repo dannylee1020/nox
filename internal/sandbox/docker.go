@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -46,7 +47,19 @@ func (d Docker) Doctor(ctx context.Context, image string) error {
 	if err != nil {
 		return fmt.Errorf("Docker is unavailable: %w", err)
 	}
-	if !strings.Contains(info.Stdout, "runsc") {
+	rawRuntimes := strings.TrimSpace(info.Stdout)
+	if rawRuntimes == "" || rawRuntimes == "null" {
+		detail := strings.TrimSpace(info.Stderr)
+		if detail == "" {
+			detail = "docker info returned no runtime data"
+		}
+		return fmt.Errorf("Docker is unavailable or inaccessible: %s", detail)
+	}
+	runtimes := make(map[string]json.RawMessage)
+	if err := json.Unmarshal([]byte(rawRuntimes), &runtimes); err != nil {
+		return fmt.Errorf("Docker returned invalid runtime data: %w", err)
+	}
+	if _, ok := runtimes["runsc"]; !ok {
 		return fmt.Errorf("Docker runtime runsc is not registered")
 	}
 	if _, err := d.Runner.Run(ctx, execx.Command{Name: "docker", Args: []string{"image", "inspect", image}}); err != nil {

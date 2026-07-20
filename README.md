@@ -28,6 +28,8 @@ task install:local
 
 Add `~/.local/bin` to `PATH` if needed. Restart Codex after installation so it discovers the skill, then explicitly invoke it with `$nox`.
 
+When `$nox` runs locally, Codex asks permission for the trusted Nox CLI to reach Docker (Colima on macOS); the delegated agent still runs inside the gVisor sandbox.
+
 The skill delegates to the installed `nox` CLI; it does not add another sandbox or daemon. It only runs when explicitly invoked as `$nox`.
 
 The local profile prepares and verifies the backend, builds the runner image, installs the skill, and finishes with `nox doctor`. Common local VM overrides:

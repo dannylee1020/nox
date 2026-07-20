@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -10,13 +11,21 @@ import (
 )
 
 type fakeRunner struct {
-	commands []execx.Command
+	commands   []execx.Command
+	doctorInfo *execx.Result
+	doctorErr  error
 }
 
 func (f *fakeRunner) Run(_ context.Context, command execx.Command) (execx.Result, error) {
 	f.commands = append(f.commands, command)
 	result := execx.Result{ExitCode: 0}
 	if len(command.Args) > 0 && command.Args[0] == "info" {
+		if f.doctorInfo != nil || f.doctorErr != nil {
+			if f.doctorInfo != nil {
+				result = *f.doctorInfo
+			}
+			return result, f.doctorErr
+		}
 		result.Stdout = `{"runsc":{"status":"ok"}}`
 	}
 	if len(command.Args) > 0 && command.Args[0] == "create" {
@@ -93,6 +102,61 @@ func TestDoctorRequiresRunsc(t *testing.T) {
 	}
 	if len(fake.commands) != 3 {
 		t.Fatalf("doctor commands = %d, want three", len(fake.commands))
+	}
+}
+
+func TestDoctorReportsDockerRuntimeFailures(t *testing.T) {
+	tests := []struct {
+		name       string
+		info       execx.Result
+		runErr     error
+		want       string
+		wantAbsent string
+	}{
+		{
+			name:   "command failure",
+			runErr: errors.New("permission denied"),
+			want:   "Docker is unavailable",
+		},
+		{
+			name:       "null output with socket denial",
+			info:       execx.Result{Stdout: "null\n", Stderr: "permission denied connecting to Docker socket\n"},
+			want:       "Docker is unavailable or inaccessible: permission denied connecting to Docker socket",
+			wantAbsent: "runsc is not registered",
+		},
+		{
+			name:       "empty output",
+			info:       execx.Result{},
+			want:       "Docker is unavailable or inaccessible: docker info returned no runtime data",
+			wantAbsent: "runsc is not registered",
+		},
+		{
+			name:       "malformed output",
+			info:       execx.Result{Stdout: "{"},
+			want:       "Docker returned invalid runtime data",
+			wantAbsent: "runsc is not registered",
+		},
+		{
+			name: "missing runsc",
+			info: execx.Result{Stdout: `{"runc":{"status":"ok"}}`},
+			want: "Docker runtime runsc is not registered",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			info := test.info
+			fake := &fakeRunner{doctorInfo: &info, doctorErr: test.runErr}
+			err := (Docker{Runner: fake}).Doctor(context.Background(), "nox-runner:v0")
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("doctor error = %v, want containing %q", err, test.want)
+			}
+			if test.wantAbsent != "" && strings.Contains(err.Error(), test.wantAbsent) {
+				t.Fatalf("doctor error = %v, should not contain %q", err, test.wantAbsent)
+			}
+			if len(fake.commands) != 1 {
+				t.Fatalf("doctor commands = %d, want one", len(fake.commands))
+			}
+		})
 	}
 }
 
