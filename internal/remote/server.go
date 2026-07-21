@@ -18,18 +18,22 @@ import (
 )
 
 type ServerConfig struct {
-	APIToken     string
-	Executor     Executor
-	MaxBodyBytes int64
+	APIToken          string
+	Executor          Executor
+	MaxBodyBytes      int64
+	MaxConcurrentRuns int
 }
 
+const DefaultMaxConcurrentRuns = 5
+
 type Server struct {
-	apiToken     string
-	executor     Executor
-	maxBodyBytes int64
-	mu           sync.RWMutex
-	jobs         map[string]*job
-	active       string
+	apiToken          string
+	executor          Executor
+	maxBodyBytes      int64
+	mu                sync.RWMutex
+	jobs              map[string]*job
+	active            map[string]struct{}
+	maxConcurrentRuns int
 }
 
 type job struct {
@@ -47,7 +51,16 @@ func NewServer(config ServerConfig) (*Server, error) {
 	if config.MaxBodyBytes <= 0 {
 		config.MaxBodyBytes = 2 << 20
 	}
-	return &Server{apiToken: config.APIToken, executor: config.Executor, maxBodyBytes: config.MaxBodyBytes, jobs: make(map[string]*job)}, nil
+	if config.MaxConcurrentRuns < 0 {
+		return nil, fmt.Errorf("max concurrent runs must be positive")
+	}
+	if config.MaxConcurrentRuns == 0 {
+		config.MaxConcurrentRuns = DefaultMaxConcurrentRuns
+	}
+	return &Server{
+		apiToken: config.APIToken, executor: config.Executor, maxBodyBytes: config.MaxBodyBytes,
+		jobs: make(map[string]*job), active: make(map[string]struct{}), maxConcurrentRuns: config.MaxConcurrentRuns,
+	}, nil
 }
 
 func (s *Server) Handler() http.Handler {
@@ -92,15 +105,15 @@ func (s *Server) runs(w http.ResponseWriter, r *http.Request) {
 	id := run.NewID()
 	ctx, cancel := context.WithCancel(context.Background())
 	s.mu.Lock()
-	if s.active != "" {
+	if len(s.active) >= s.maxConcurrentRuns {
 		s.mu.Unlock()
 		cancel()
-		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "another run is active"})
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "maximum concurrent runs reached"})
 		return
 	}
 	status := RunStatus{RunID: id, State: StateQueued, StartedAt: time.Now().UTC()}
 	s.jobs[id] = &job{status: status, cancel: cancel}
-	s.active = id
+	s.active[id] = struct{}{}
 	s.mu.Unlock()
 
 	go s.execute(ctx, id, request)
@@ -173,7 +186,7 @@ func (s *Server) execute(ctx context.Context, id string, request RunRequest) {
 	}
 	defer s.mu.Unlock()
 	current.status.CompletedAt = time.Now().UTC()
-	s.active = ""
+	delete(s.active, id)
 	if ctx.Err() != nil {
 		current.status.State = StateCancelled
 		current.status.Stage = "cancelled"

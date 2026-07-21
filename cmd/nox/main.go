@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -102,10 +103,15 @@ func serve(args []string) error {
 	codexHome := fs.String("codex-home", getenv("CODEX_HOME", ""), "host Codex directory")
 	gitName := fs.String("git-name", getenv("NOX_GIT_NAME", "Nox Worker"), "Git author name")
 	gitEmail := fs.String("git-email", getenv("NOX_GIT_EMAIL", "nox@localhost"), "Git author email")
+	maxConcurrentRunsValue := fs.String("max-concurrent-runs", os.Getenv("NOX_MAX_CONCURRENT_RUNS"), "maximum active remote runs (default 5)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
+		return err
+	}
+	maxConcurrentRuns, err := parseMaxConcurrentRuns(*maxConcurrentRunsValue)
+	if err != nil {
 		return err
 	}
 	apiToken := os.Getenv("NOX_API_TOKEN")
@@ -120,7 +126,9 @@ func serve(args []string) error {
 		StateRoot: *stateRoot, GitHubToken: githubToken, GitHubAPIURL: *githubAPI,
 		CodexHome: *codexHome, GitName: *gitName, GitEmail: *gitEmail,
 	})
-	service, err := remote.NewServer(remote.ServerConfig{APIToken: apiToken, Executor: coordinator})
+	service, err := remote.NewServer(remote.ServerConfig{
+		APIToken: apiToken, Executor: coordinator, MaxConcurrentRuns: maxConcurrentRuns,
+	})
 	if err != nil {
 		return err
 	}
@@ -145,6 +153,17 @@ func serve(args []string) error {
 		return err
 	}
 	return nil
+}
+
+func parseMaxConcurrentRuns(value string) (int, error) {
+	if value == "" {
+		return 0, nil
+	}
+	limit, err := strconv.Atoi(value)
+	if err != nil || limit <= 0 {
+		return 0, fmt.Errorf("--max-concurrent-runs/NOX_MAX_CONCURRENT_RUNS must be a positive integer, got %q", value)
+	}
+	return limit, nil
 }
 
 func getenv(name, fallback string) string {

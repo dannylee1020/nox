@@ -48,7 +48,7 @@ func TestServerHealthDoesNotRequireAuthentication(t *testing.T) {
 }
 
 func TestServerRequiresBearerTokenAndStartsRun(t *testing.T) {
-	server, err := NewServer(ServerConfig{APIToken: "secret", Executor: fakeExecutor{}})
+	server, err := NewServer(ServerConfig{APIToken: "secret", Executor: fakeExecutor{}, MaxConcurrentRuns: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,6 +78,13 @@ func TestServerRequiresBearerTokenAndStartsRun(t *testing.T) {
 		current := server.jobs[status.RunID].status
 		server.mu.RUnlock()
 		if current.State == StateCompleted {
+			nextRequest := httptest.NewRequest(http.MethodPost, "/v1/runs", strings.NewReader(string(payload)))
+			nextRequest.Header.Set("Authorization", "Bearer secret")
+			next := httptest.NewRecorder()
+			server.Handler().ServeHTTP(next, nextRequest)
+			if next.Code != http.StatusAccepted {
+				t.Fatalf("status after completion = %d, body = %s", next.Code, next.Body.String())
+			}
 			return
 		}
 		time.Sleep(time.Millisecond)
@@ -85,9 +92,9 @@ func TestServerRequiresBearerTokenAndStartsRun(t *testing.T) {
 	t.Fatal("run did not complete")
 }
 
-func TestServerRejectsSecondActiveRun(t *testing.T) {
+func TestServerEnforcesMaxConcurrentRuns(t *testing.T) {
 	block := make(chan struct{})
-	server, err := NewServer(ServerConfig{APIToken: "secret", Executor: fakeExecutor{block: block}})
+	server, err := NewServer(ServerConfig{APIToken: "secret", Executor: fakeExecutor{block: block}, MaxConcurrentRuns: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,15 +109,35 @@ func TestServerRejectsSecondActiveRun(t *testing.T) {
 	if status := makeRequest().Code; status != http.StatusAccepted {
 		t.Fatalf("first status = %d", status)
 	}
+	if status := makeRequest().Code; status != http.StatusAccepted {
+		t.Fatalf("second status = %d", status)
+	}
 	if status := makeRequest().Code; status != http.StatusTooManyRequests {
-		t.Fatalf("second status = %d, want %d", status, http.StatusTooManyRequests)
+		t.Fatalf("third status = %d, want %d", status, http.StatusTooManyRequests)
 	}
 	close(block)
 }
 
+func TestServerDefaultsToFiveConcurrentRuns(t *testing.T) {
+	server, err := NewServer(ServerConfig{APIToken: "secret", Executor: fakeExecutor{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if server.maxConcurrentRuns != DefaultMaxConcurrentRuns {
+		t.Fatalf("max concurrent runs = %d, want %d", server.maxConcurrentRuns, DefaultMaxConcurrentRuns)
+	}
+}
+
+func TestServerRejectsNegativeMaxConcurrentRuns(t *testing.T) {
+	if _, err := NewServer(ServerConfig{APIToken: "secret", Executor: fakeExecutor{}, MaxConcurrentRuns: -1}); err == nil {
+		t.Fatal("expected max concurrent runs error")
+	}
+}
+
 func TestServerCancellationCancelsRun(t *testing.T) {
 	block := make(chan struct{})
-	server, err := NewServer(ServerConfig{APIToken: "secret", Executor: fakeExecutor{block: block}})
+	defer close(block)
+	server, err := NewServer(ServerConfig{APIToken: "secret", Executor: fakeExecutor{block: block}, MaxConcurrentRuns: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,6 +161,13 @@ func TestServerCancellationCancelsRun(t *testing.T) {
 		current := server.jobs[status.RunID].status
 		server.mu.RUnlock()
 		if current.State == StateCancelled {
+			request := httptest.NewRequest(http.MethodPost, "/v1/runs", strings.NewReader(string(payload)))
+			request.Header.Set("Authorization", "Bearer secret")
+			next := httptest.NewRecorder()
+			server.Handler().ServeHTTP(next, request)
+			if next.Code != http.StatusAccepted {
+				t.Fatalf("status after cancellation = %d, body = %s", next.Code, next.Body.String())
+			}
 			return
 		}
 		time.Sleep(time.Millisecond)

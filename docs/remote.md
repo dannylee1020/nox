@@ -41,6 +41,7 @@ NOX_API_TOKEN=<private-api-token>
 NOX_GITHUB_TOKEN=<github-fine-grained-token>
 NOX_LISTEN_ADDR=0.0.0.0:8080
 NOX_STATE_ROOT=/var/lib/nox
+NOX_MAX_CONCURRENT_RUNS=5
 CODEX_HOME=/var/lib/nox/codex
 NOX_GIT_NAME=Nox Worker
 NOX_GIT_EMAIL=nox@localhost
@@ -141,7 +142,7 @@ curl -fsS -X POST \
 
 A successful status includes the generated `nox/<run-id>` branch, result commit, and `pullRequestUrl`. Failed, cancelled, timed-out, and no-change runs do not create pull requests.
 
-The first version accepts one active run. A second submission returns `429`; there is no durable queue or restart recovery.
+The server accepts up to `NOX_MAX_CONCURRENT_RUNS` active runs (default `5`). `nox serve --max-concurrent-runs` overrides the environment value. Submissions above the limit return `429`; there is no durable queue or restart recovery.
 
 ## Operator diagnostics
 
