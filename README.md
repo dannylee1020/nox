@@ -90,6 +90,7 @@ Useful inspection commands:
 
 ```text
 $nox status            conversational status for delegated tasks
+nox watch              list active local runs and choose one
 nox watch <run-id>     follow lifecycle and logs
 nox inspect <run-id>   inspect run metadata
 nox diff <run-id>      inspect the published patch

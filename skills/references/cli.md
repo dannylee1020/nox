@@ -66,12 +66,15 @@ For Codex, Nox prepends a deterministic execution envelope containing the resolv
 ## Monitor and inspect
 
 ```bash
+nox watch                          # list active local runs
 nox watch <run-id>                 # local run
 nox watch --remote <run-id>       # remote run
 nox cancel --remote <run-id>      # explicitly cancel remote work
 nox inspect <run-id>
 nox diff <run-id>
 ```
+
+Running `nox watch` without an ID lists active local runs. In an interactive terminal it prompts for a run to follow; with non-interactive input it prints explicit `nox watch <run-id>` commands and exits. Remote watch still requires an ID because the remote API cannot list jobs.
 
 Stopping `nox watch --remote` does not cancel the server-owned run. Run state and logs for local runs are stored under `~/.nox/runs/<run-id>` by default; remote details remain on the worker.
 

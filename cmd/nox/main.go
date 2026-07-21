@@ -25,7 +25,8 @@ import (
 const usageText = `Nox runs coding agents inside local or remote Docker/gVisor sandboxes.
 
 Commands:
-  nox watch [--remote] <run-id>
+  nox watch [<run-id>]
+  nox watch --remote <run-id>
   nox cancel --remote <run-id>
   nox doctor
   nox serve
