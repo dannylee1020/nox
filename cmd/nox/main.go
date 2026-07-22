@@ -26,15 +26,13 @@ import (
 const usageText = `Nox runs coding agents inside local or remote Docker/gVisor sandboxes.
 
 Commands:
-  nox watch [<run-id>]
-  nox watch --remote <run-id>
   nox ui
   nox cancel --remote <run-id>
   nox doctor
   nox serve
   nox launch --repo . --from main --output-branch nox/change --task "..." --validate "..."
   nox submit --repo . --from main --title "..." --task-file contract.md --validate "..."
-  nox inspect <run-id>
+  nox inspect [--remote] <run-id>
   nox diff <run-id>
   nox cleanup <run-id>
   nox cleanup --stale
@@ -47,8 +45,6 @@ func main() {
 	}
 	var err error
 	switch os.Args[1] {
-	case "watch":
-		err = watch(os.Args[2:])
 	case "ui":
 		err = uiCommand(os.Args[2:])
 	case "cancel":
@@ -248,7 +244,7 @@ func launch(args []string) error {
 		Image: *image, StateRoot: *stateRoot, CodexHome: *codexHome, CPU: *cpu, Memory: *memory,
 		PIDs: *pids, Timeout: *timeout, Output: output, ErrorOutput: os.Stderr,
 		OnStart: func(metadata store.Metadata) error {
-			_, err := fmt.Fprintf(os.Stderr, "run: %s\nwatch: nox watch %s\n", metadata.RunID, metadata.RunID)
+			_, err := fmt.Fprintf(os.Stderr, "run: %s\nmonitor: nox ui\ninspect: nox inspect %s\n", metadata.RunID, metadata.RunID)
 			return err
 		},
 	})
@@ -267,19 +263,54 @@ func launch(args []string) error {
 }
 
 func inspect(args []string) error {
-	if len(args) != 1 {
-		return errors.New("usage: nox inspect <run-id>")
+	fs := flag.NewFlagSet("inspect", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	remoteMode := fs.Bool("remote", false, "inspect a remote run using NOX_REMOTE_URL")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: nox inspect [--remote] <run-id>")
+	}
+	if *remoteMode {
+		client, err := remote.NewClient(os.Getenv("NOX_REMOTE_URL"), os.Getenv("NOX_API_TOKEN"), nil)
+		if err != nil {
+			return err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return inspectRemote(ctx, client, fs.Arg(0), os.Stdout)
 	}
 	st, err := defaultStore()
 	if err != nil {
 		return err
 	}
-	metadata, err := st.ReadMetadata(args[0])
+	metadata, err := st.ReadMetadata(fs.Arg(0))
 	if err != nil {
 		return err
 	}
-	data, _ := json.MarshalIndent(metadata, "", "  ")
-	fmt.Println(string(data))
+	return writeIndentedJSON(os.Stdout, metadata)
+}
+
+func inspectRemote(ctx context.Context, client *remote.Client, runID string, output io.Writer) error {
+	status, err := client.Status(ctx, runID)
+	if err != nil {
+		return err
+	}
+	return writeIndentedJSON(output, status)
+}
+
+func writeIndentedJSON(output io.Writer, value any) error {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode inspection result: %w", err)
+	}
+	if _, err := fmt.Fprintln(output, string(data)); err != nil {
+		return fmt.Errorf("write inspection result: %w", err)
+	}
 	return nil
 }
 

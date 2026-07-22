@@ -26,7 +26,7 @@ A status request is read-only. Route it through the status workflow and return w
    ```
 
 4. Send all worker probes before waiting, then collect replies only until a shared 10-second deadline. Never use `interrupt_agent`, restart a completed worker, or take ownership of its foreground command. If a worker does not reply, use its last known state and label the information as last-known.
-5. Corroborate a local run with read-only `nox inspect <run-id>`. For a remote run, use the monitor worker's latest `nox watch --remote` state. Do not construct direct API requests, expose `NOX_API_TOKEN`, or run local Docker commands for remote status.
+5. Corroborate a local run with read-only `nox inspect <run-id>`. For a remote run, use the monitor worker's latest `nox inspect --remote <run-id>` state. Do not construct direct API requests, expose `NOX_API_TOKEN`, or run local Docker commands for remote status.
 6. Keep worker state and raw Nox run state separate. Prefer Nox metadata for local lifecycle/result fields and the worker report for its current command and monitoring session. If sources differ, report both without guessing.
 7. Return tasks newest-first using every field in this fixed Markdown shape. Use `unknown`, `pending`, `none`, `not published`, or `unavailable` rather than omitting a field:
 
@@ -38,7 +38,7 @@ A status request is read-only. Route it through the status workflow and return w
    - Worker: <thread identifier> — <running|completed|failed|missing>
    - Run: <run-id or pending> — <raw Nox state or unknown>
    - Current activity: <activity or unknown>
-   - Monitoring: <foreground launch|remote watch|last-known|none>
+   - Monitoring: <foreground launch|remote inspect|last-known|none>
    - Result: <branch and commit|pull request|no changes|not published|pending>
    - Validation: <not started|pending|running|passed|failed>
    - Blocker: <concise error|none|unknown>
@@ -77,13 +77,13 @@ If `NOX_REMOTE_URL` is set, use the remote submission workflow below. Otherwise,
      --validate <validation-command>
    ```
 
-   Then spawn the background worker subagent with only the returned run ID. Record the run ID with the worker identifier. It runs:
+   Then spawn the background worker subagent with only the returned run ID. Record the run ID with the worker identifier. It polls with separate command invocations:
 
    ```bash
-   nox watch --remote <run-id>
+   nox inspect --remote <run-id>
    ```
 
-   The monitor reports the terminal state, branch, commit, or pull-request URL. It does not resubmit, reinterpret the contract, merge the pull request, or cancel the run when monitoring stops. Use `nox cancel --remote <run-id>` only when the user explicitly requests cancellation.
+   The worker waits between snapshots and stops polling only after a terminal state is reported. It reports the terminal state, branch, commit, or pull-request URL. It does not resubmit, reinterpret the contract, merge the pull request, or cancel the run when monitoring stops. Use `nox cancel --remote <run-id>` only when the user explicitly requests cancellation.
 
    Local mode (`NOX_REMOTE_URL` is unset):
 
@@ -116,14 +116,14 @@ If `NOX_REMOTE_URL` is set, use the remote submission workflow below. Otherwise,
     nox diff <run-id>
     ```
 
-    Remote results are inspected through the reported pull-request URL and operator-side run state.
+    Remote results are inspected with `nox inspect --remote <run-id>`, the reported pull-request URL, and operator-side run state.
 14. Report the execution mode, result branch or pull-request URL, validation result, run ID, and evidence available for that mode.
 15. Do not automatically switch to a local result branch or merge a remote pull request. Let the user decide.
 
 ## Safety boundaries
 
 - Nox's outer `runsc` container is the isolation boundary. Never bypass `nox doctor` in the local worker or substitute `runc`.
-- Scoped Docker escalation applies only to local `nox doctor` and `nox launch`. Remote `nox submit` and `nox watch --remote` do not access local Docker; report any separate outbound-network restriction without treating it as a Colima or `runsc` failure.
+- Scoped Docker escalation applies only to local `nox doctor` and `nox launch`. Remote `nox submit` and `nox inspect --remote` do not access local Docker; report any separate outbound-network restriction without treating it as a Colima or `runsc` failure.
 - Codex runs autonomously inside the disposable sandbox; the original checkout is not mounted or modified.
 - Nox creates the host-side result commit only after validation succeeds.
 - The main thread must not wait on the long-lived local launch or remote monitor subagent.

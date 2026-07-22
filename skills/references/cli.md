@@ -31,7 +31,7 @@ Useful options:
 - `--codex-home <path>`
 - `--state-root <path>`
 
-The launch command prints a run ID immediately and suggests `nox watch <run-id>`.
+The launch command prints a run ID immediately and points to `nox ui` for live monitoring and `nox inspect <run-id>` for a metadata snapshot.
 
 ## Remote submit
 
@@ -52,7 +52,7 @@ Use `--detach --json` when a parent agent will monitor the run separately:
 
 ```bash
 nox submit --detach --json ...
-nox watch --remote <run-id>
+nox inspect --remote <run-id>
 ```
 
 ## Task input contract
@@ -66,20 +66,14 @@ For Codex, Nox prepends a deterministic execution envelope containing the resolv
 ## Monitor and inspect
 
 ```bash
-nox watch                          # list active local runs
-nox watch <run-id>                 # local run
-nox watch --remote <run-id>       # remote run
+nox ui                             # live local or host-side console
 nox cancel --remote <run-id>      # explicitly cancel remote work
-nox inspect <run-id>
+nox inspect <run-id>               # one local metadata snapshot
+nox inspect --remote <run-id>      # one remote status snapshot
 nox diff <run-id>
-nox ui                             # read-only local run console
 ```
 
-Running `nox watch` without an ID lists active local runs. In an interactive terminal it prompts for a run to follow; with non-interactive input it prints explicit `nox watch <run-id>` commands and exits. Remote watch still requires an ID because the remote API cannot list jobs.
-
-Stopping `nox watch --remote` does not cancel the server-owned run. Run state and logs for local runs are stored under `~/.nox/runs/<run-id>` by default; remote details remain on the worker.
-
-`nox ui` serves the same local evidence on `127.0.0.1:8081`. On a remote worker it runs as a separate loopback-only service and is reached through an SSH tunnel. The console never changes run state.
+`nox ui` serves stored run evidence on `127.0.0.1:8081`. On a remote worker it runs as a separate loopback-only service and is reached through an SSH tunnel. The console never changes run state. `nox inspect` is non-blocking and emits one JSON snapshot for agent-side checks; repeated remote inspection does not cancel the server-owned run.
 
 ## Skill status command
 
@@ -90,7 +84,7 @@ $nox status            # every active task in the current thread
 $nox status <run-id>   # one tracked task
 ```
 
-The skill asks each running Nox worker for a non-disruptive point-in-time report and returns fixed fields for the worker, run state, current activity, monitor, result, validation, blocker, and evidence. If no task remains active, the unqualified command reports the most recently dispatched task. It never launches, interrupts, cancels, or cleans up work. Local status is corroborated with `nox inspect`; remote status comes from the existing `nox watch --remote` monitor.
+The skill asks each running Nox worker for a non-disruptive point-in-time report and returns fixed fields for the worker, run state, current activity, monitor, result, validation, blocker, and evidence. If no task remains active, the unqualified command reports the most recently dispatched task. It never launches, interrupts, cancels, or cleans up work. Local and remote status are corroborated with the corresponding `nox inspect` command.
 
 ## Result contract
 

@@ -86,20 +86,28 @@ nox launch \
   --validate "go test ./..."
 ```
 
+## View tasks
+
+Run `nox ui` to open a read-only dashboard for active and recent tasks:
+
+```bash
+nox ui
+```
+
+Open `http://127.0.0.1:8081` to view lifecycle progress, task metadata, validation, publication results, and logs. On a remote worker, reach the same dashboard through an SSH tunnel. See [run monitoring](docs/ui.md).
+
 Useful inspection commands:
 
 ```text
 $nox status            conversational status for delegated tasks
-nox ui                 open the local read-only run console
-nox watch              list active local runs and choose one
-nox watch <run-id>     follow lifecycle and logs
+nox ui                 open the read-only task dashboard
 nox inspect <run-id>   inspect run metadata
+nox inspect --remote <run-id>
+                       inspect one remote status snapshot
 nox diff <run-id>      inspect the published patch
 ```
 
 Nox does not automatically switch to, merge, or push a local result branch.
-
-The same read-only console can run on a private remote worker and be reached through an SSH tunnel. See [run monitoring](docs/ui.md).
 
 ## Security boundary
 

@@ -1,6 +1,6 @@
 # Run monitoring
 
-`nox ui` serves a read-only console for active and recent Nox runs. It reads the same metadata and logs used by `nox watch`; it does not submit, cancel, retry, clean up, or otherwise change a run.
+`nox ui` serves a read-only console for active and recent Nox runs. It reads stored run metadata and logs; it does not submit, cancel, retry, clean up, or otherwise change a run.
 
 ## Local
 
