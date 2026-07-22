@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -27,6 +28,7 @@ const usageText = `Nox runs coding agents inside local or remote Docker/gVisor s
 Commands:
   nox watch [<run-id>]
   nox watch --remote <run-id>
+  nox ui
   nox cancel --remote <run-id>
   nox doctor
   nox serve
@@ -47,6 +49,8 @@ func main() {
 	switch os.Args[1] {
 	case "watch":
 		err = watch(os.Args[2:])
+	case "ui":
+		err = uiCommand(os.Args[2:])
 	case "cancel":
 		err = cancelRun(os.Args[2:])
 	case "doctor":
@@ -123,12 +127,25 @@ func serve(args []string) error {
 	if githubToken == "" {
 		return errors.New("NOX_GITHUB_TOKEN is required")
 	}
+	if *stateRoot == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		*stateRoot = filepath.Join(home, ".nox", "remote")
+	}
 	coordinator := remote.NewCoordinator(remote.CoordinatorConfig{
 		StateRoot: *stateRoot, GitHubToken: githubToken, GitHubAPIURL: *githubAPI,
 		CodexHome: *codexHome, GitName: *gitName, GitEmail: *gitEmail,
 	})
+	listener, err := net.Listen("tcp", *listen)
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
 	service, err := remote.NewServer(remote.ServerConfig{
 		APIToken: apiToken, Executor: coordinator, MaxConcurrentRuns: maxConcurrentRuns,
+		StatusRoot: filepath.Join(*stateRoot, "jobs"),
 	})
 	if err != nil {
 		return err
@@ -149,8 +166,8 @@ func serve(args []string) error {
 		defer cancel()
 		_ = httpServer.Shutdown(shutdownContext)
 	}()
-	fmt.Printf("nox serve listening on %s\n", *listen)
-	if err := httpServer.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+	fmt.Printf("nox serve listening on %s\n", listener.Addr().String())
+	if err := httpServer.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	return nil

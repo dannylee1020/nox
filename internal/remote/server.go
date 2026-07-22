@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -22,6 +23,7 @@ type ServerConfig struct {
 	Executor          Executor
 	MaxBodyBytes      int64
 	MaxConcurrentRuns int
+	StatusRoot        string
 }
 
 const DefaultMaxConcurrentRuns = 5
@@ -34,11 +36,13 @@ type Server struct {
 	jobs              map[string]*job
 	active            map[string]struct{}
 	maxConcurrentRuns int
+	statusStore       *StatusStore
 }
 
 type job struct {
-	status RunStatus
-	cancel context.CancelFunc
+	status  RunStatus
+	request RunRequest
+	cancel  context.CancelFunc
 }
 
 func NewServer(config ServerConfig) (*Server, error) {
@@ -57,9 +61,18 @@ func NewServer(config ServerConfig) (*Server, error) {
 	if config.MaxConcurrentRuns == 0 {
 		config.MaxConcurrentRuns = DefaultMaxConcurrentRuns
 	}
+	var statusStore *StatusStore
+	if config.StatusRoot != "" {
+		var err error
+		statusStore, err = NewStatusStore(config.StatusRoot)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return &Server{
 		apiToken: config.APIToken, executor: config.Executor, maxBodyBytes: config.MaxBodyBytes,
 		jobs: make(map[string]*job), active: make(map[string]struct{}), maxConcurrentRuns: config.MaxConcurrentRuns,
+		statusStore: statusStore,
 	}, nil
 }
 
@@ -112,7 +125,14 @@ func (s *Server) runs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := RunStatus{RunID: id, State: StateQueued, StartedAt: time.Now().UTC()}
-	s.jobs[id] = &job{status: status, cancel: cancel}
+	current := &job{status: status, request: request, cancel: cancel}
+	if err := s.writeJob(current); err != nil {
+		s.mu.Unlock()
+		cancel()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "persist remote run status"})
+		return
+	}
+	s.jobs[id] = current
 	s.active[id] = struct{}{}
 	s.mu.Unlock()
 
@@ -191,12 +211,14 @@ func (s *Server) execute(ctx context.Context, id string, request RunRequest) {
 		current.status.State = StateCancelled
 		current.status.Stage = "cancelled"
 		current.status.Error = "run cancelled"
+		s.persistJob(current)
 		return
 	}
 	if err != nil {
 		current.status.State = StateFailed
 		current.status.Stage = "execution"
 		current.status.Error = err.Error()
+		s.persistJob(current)
 		return
 	}
 	current.status.Branch = publication.Branch
@@ -205,10 +227,12 @@ func (s *Server) execute(ctx context.Context, id string, request RunRequest) {
 	if publication.NoChanges {
 		current.status.State = StateNoChanges
 		current.status.Stage = "completed"
+		s.persistJob(current)
 		return
 	}
 	current.status.State = StateCompleted
 	current.status.Stage = "pull_request"
+	s.persistJob(current)
 }
 
 func (s *Server) setState(id, state, stage, message string) {
@@ -218,6 +242,27 @@ func (s *Server) setState(id, state, stage, message string) {
 		current.status.State = state
 		current.status.Stage = stage
 		current.status.Error = message
+		s.persistJob(current)
+	}
+}
+
+func (s *Server) writeJob(current *job) error {
+	if s.statusStore == nil {
+		return nil
+	}
+	status := current.status
+	return s.statusStore.Write(JobRecord{
+		RunID: status.RunID, Repository: current.request.Repository,
+		BaseBranch: current.request.BaseBranch, BaseCommit: current.request.BaseCommit, Title: current.request.Title,
+		State: status.State, Stage: status.Stage, Error: status.Error,
+		Branch: status.Branch, Commit: status.Commit, PullRequestURL: status.PullRequestURL,
+		StartedAt: status.StartedAt, CompletedAt: status.CompletedAt,
+	})
+}
+
+func (s *Server) persistJob(current *job) {
+	if err := s.writeJob(current); err != nil {
+		log.Printf("nox: persist remote status: %v", err)
 	}
 }
 

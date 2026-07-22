@@ -12,7 +12,7 @@ private client
   → teardown
 ```
 
-Remote mode does not expose raw agent logs or patch download endpoints. Operators can inspect the VM-local run state and system journal when a run fails.
+Remote mode does not expose raw agent logs or patch download endpoints through the execution API. Operators can inspect VM-local evidence through the loopback-only monitoring UI or the system journal.
 
 ## Prerequisites
 
@@ -30,7 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/nox-dev/nox/main/install.sh | bash 
 sudo ./install.sh remote
 ```
 
-The installer verifies Docker/runsc, builds `nox-runner:v0`, installs `/usr/local/bin/nox` and the systemd unit, and creates the service/config/state directories. It does not enable or start the service, and it does not install Colima or the Codex skill.
+The installer verifies Docker/runsc, builds `nox-runner:v0`, installs `/usr/local/bin/nox` and both systemd units, and creates the service, configuration, and state directories. It does not enable or start either service, and it does not install Colima or the Codex skill.
 
 ## Configuration
 
@@ -80,6 +80,28 @@ sudo systemctl status nox
 ```
 
 The installer intentionally does not run these service lifecycle commands.
+
+The installer also creates a credential-free `/etc/nox/nox-ui.env`:
+
+```text
+NOX_UI_LISTEN_ADDR=127.0.0.1:8081
+NOX_UI_RUNS_ROOT=/var/lib/nox/runs
+NOX_UI_REMOTE_STATUS_ROOT=/var/lib/nox/jobs
+NOX_UI_RECENT_RUNS=20
+```
+
+The monitoring UI is a separate read-only process and does not receive the API or GitHub tokens. Start it independently:
+
+```bash
+sudo systemctl enable --now nox-ui
+sudo systemctl status nox-ui
+```
+
+Keep it bound to loopback. From an operator machine, create a tunnel and open `http://127.0.0.1:8081` locally:
+
+```bash
+ssh -L 8081:127.0.0.1:8081 <worker-host>
+```
 
 Check readiness:
 
@@ -150,7 +172,8 @@ Remote users receive concise status only. Operators can inspect details on the V
 
 ```bash
 sudo journalctl -u nox -f
+sudo journalctl -u nox-ui -f
 sudo find /var/lib/nox/runs -maxdepth 2 -type f -print
 ```
 
-Do not expose the run directory or system journal through the API.
+Do not expose the run directory, monitoring UI, or system journal on a public interface. Logs may contain sensitive repository or tool output.

@@ -402,6 +402,8 @@ build_runner_image() {
 preflight_remote_install() {
 	[ -f "$SOURCE_DIR/deploy/nox.service" ] || \
 		die "remote service unit is missing from $SOURCE_DIR/deploy/nox.service"
+	[ -f "$SOURCE_DIR/deploy/nox-ui.service" ] || \
+		die "remote UI service unit is missing from $SOURCE_DIR/deploy/nox-ui.service"
 }
 
 ensure_remote_user() {
@@ -418,21 +420,23 @@ ensure_remote_user() {
 }
 
 install_remote_layout() {
-	local config_dir state_root runs_dir codex_dir systemd_dir env_file
+	local config_dir state_root runs_dir jobs_dir codex_dir systemd_dir env_file ui_env_file
 	config_dir="$(stage_path "$REMOTE_CONFIG_DIR")"
 	state_root="$(stage_path "$REMOTE_STATE_ROOT")"
 	runs_dir="$state_root/runs"
+	jobs_dir="$state_root/jobs"
 	codex_dir="$state_root/codex"
 	systemd_dir="$(stage_path "$REMOTE_SYSTEMD_DIR")"
 	env_file="$config_dir/nox.env"
+	ui_env_file="$config_dir/nox-ui.env"
 
 	ensure_remote_user
-	run_privileged mkdir -p "$config_dir" "$runs_dir" "$codex_dir" "$systemd_dir"
-	run_privileged chmod 0750 "$config_dir" "$state_root" "$runs_dir"
+	run_privileged mkdir -p "$config_dir" "$runs_dir" "$jobs_dir" "$codex_dir" "$systemd_dir"
+	run_privileged chmod 0750 "$config_dir" "$state_root" "$runs_dir" "$jobs_dir"
 	run_privileged chmod 0700 "$codex_dir"
 	if ! is_staged; then
 		run_privileged chown root:"$REMOTE_USER" "$config_dir"
-		run_privileged chown "$REMOTE_USER:$REMOTE_USER" "$state_root" "$runs_dir" "$codex_dir"
+		run_privileged chown "$REMOTE_USER:$REMOTE_USER" "$state_root" "$runs_dir" "$jobs_dir" "$codex_dir"
 	fi
 
 	if [ -e "$env_file" ]; then
@@ -458,9 +462,30 @@ EOF
 		rm -f "$template"
 		log "created configuration template $REMOTE_CONFIG_DIR/nox.env"
 	fi
+	if [ -e "$ui_env_file" ]; then
+		log "preserving existing configuration $REMOTE_CONFIG_DIR/nox-ui.env"
+	else
+		local ui_template
+		ui_template="$(mktemp "${TMPDIR:-/tmp}/nox-ui-env.XXXXXX")"
+		cat >"$ui_template" <<'EOF'
+NOX_UI_LISTEN_ADDR=127.0.0.1:8081
+NOX_UI_RUNS_ROOT=/var/lib/nox/runs
+NOX_UI_REMOTE_STATUS_ROOT=/var/lib/nox/jobs
+NOX_UI_RECENT_RUNS=20
+EOF
+		if is_staged; then
+			install -m 0640 "$ui_template" "$ui_env_file"
+		else
+			run_privileged install -o root -g "$REMOTE_USER" -m 0640 "$ui_template" "$ui_env_file"
+		fi
+		rm -f "$ui_template"
+		log "created configuration template $REMOTE_CONFIG_DIR/nox-ui.env"
+	fi
 
 	run_privileged install -m 0644 "$SOURCE_DIR/deploy/nox.service" "$systemd_dir/nox.service"
 	log "installed systemd unit $REMOTE_SYSTEMD_DIR/nox.service"
+	run_privileged install -m 0644 "$SOURCE_DIR/deploy/nox-ui.service" "$systemd_dir/nox-ui.service"
+	log "installed systemd unit $REMOTE_SYSTEMD_DIR/nox-ui.service"
 }
 
 run_doctor() {
@@ -490,9 +515,10 @@ EOF
 print_remote_summary() {
 	cat <<EOF
 
-Nox remote worker files are installed, but the service was not started.
+Nox remote worker files are installed, but the services were not started.
 CLI: $REMOTE_PREFIX/nox
 Config: $REMOTE_CONFIG_DIR/nox.env
+UI config: $REMOTE_CONFIG_DIR/nox-ui.env
 State: $REMOTE_STATE_ROOT
 
 Next steps:
@@ -500,9 +526,11 @@ Next steps:
   2. Authenticate Codex for the service user:
      sudo -u $REMOTE_USER -H env HOME=$REMOTE_STATE_ROOT CODEX_HOME=$REMOTE_STATE_ROOT/codex codex login
   3. Review the private listen address and network firewall rules.
-  4. Start after configuration:
+  4. Start the execution API after configuration:
      sudo systemctl daemon-reload
      sudo systemctl enable --now nox
+  5. Start the loopback-only monitoring UI when needed:
+     sudo systemctl enable --now nox-ui
 EOF
 }
 

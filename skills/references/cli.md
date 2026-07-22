@@ -72,11 +72,14 @@ nox watch --remote <run-id>       # remote run
 nox cancel --remote <run-id>      # explicitly cancel remote work
 nox inspect <run-id>
 nox diff <run-id>
+nox ui                             # read-only local run console
 ```
 
 Running `nox watch` without an ID lists active local runs. In an interactive terminal it prompts for a run to follow; with non-interactive input it prints explicit `nox watch <run-id>` commands and exits. Remote watch still requires an ID because the remote API cannot list jobs.
 
 Stopping `nox watch --remote` does not cancel the server-owned run. Run state and logs for local runs are stored under `~/.nox/runs/<run-id>` by default; remote details remain on the worker.
+
+`nox ui` serves the same local evidence on `127.0.0.1:8081`. On a remote worker it runs as a separate loopback-only service and is reached through an SSH tunnel. The console never changes run state.
 
 ## Skill status command
 

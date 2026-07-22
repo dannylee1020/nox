@@ -1,0 +1,20 @@
+[Unit]
+Description=Nox read-only run monitoring UI
+After=network.target
+
+[Service]
+Type=simple
+User=nox
+Group=nox
+EnvironmentFile=/etc/nox/nox-ui.env
+ExecStart=/usr/local/bin/nox ui
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target

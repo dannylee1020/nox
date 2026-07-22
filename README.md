@@ -90,6 +90,7 @@ Useful inspection commands:
 
 ```text
 $nox status            conversational status for delegated tasks
+nox ui                 open the local read-only run console
 nox watch              list active local runs and choose one
 nox watch <run-id>     follow lifecycle and logs
 nox inspect <run-id>   inspect run metadata
@@ -97,6 +98,8 @@ nox diff <run-id>      inspect the published patch
 ```
 
 Nox does not automatically switch to, merge, or push a local result branch.
+
+The same read-only console can run on a private remote worker and be reached through an SSH tunnel. See [run monitoring](docs/ui.md).
 
 ## Security boundary
 

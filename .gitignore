@@ -12,3 +12,7 @@ coverage.out
 .kkt/
 memory/
 *.todo
+DESIGN.md
+PRODUCT.md
+.impeccable/
+.impeccable.md

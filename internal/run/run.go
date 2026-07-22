@@ -20,23 +20,24 @@ import (
 )
 
 type Config struct {
-	RunID        string
-	Repo         string
-	From         string
-	OutputBranch string
-	Task         string
-	Validation   string
-	Network      string
-	Image        string
-	StateRoot    string
-	CodexHome    string
-	CPU          string
-	Memory       string
-	PIDs         int
-	Timeout      time.Duration
-	Output       io.Writer
-	ErrorOutput  io.Writer
-	OnStart      func(store.Metadata) error
+	RunID           string
+	Repo            string
+	RepositoryLabel string
+	From            string
+	OutputBranch    string
+	Task            string
+	Validation      string
+	Network         string
+	Image           string
+	StateRoot       string
+	CodexHome       string
+	CPU             string
+	Memory          string
+	PIDs            int
+	Timeout         time.Duration
+	Output          io.Writer
+	ErrorOutput     io.Writer
+	OnStart         func(store.Metadata) error
 }
 
 type Result struct {
@@ -124,7 +125,7 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 	}
 	workspace := filepath.Join(runDir, "workspace")
 	metadata := store.Metadata{
-		RunID: id, Repo: config.Repo, From: config.From, OutputBranch: config.OutputBranch,
+		RunID: id, Repo: config.Repo, RepositoryLabel: config.RepositoryLabel, From: config.From, OutputBranch: config.OutputBranch,
 		Agent: adapter.Name(), AgentPermissions: adapter.PermissionMode(), Validation: config.Validation,
 		Network: config.Network, Image: config.Image, State: store.StateInitializing,
 		StartedAt: time.Now(), Workspace: workspace,

@@ -27,6 +27,7 @@ const (
 type Metadata struct {
 	RunID             string    `json:"runId"`
 	Repo              string    `json:"repo"`
+	RepositoryLabel   string    `json:"repositoryLabel,omitempty"`
 	From              string    `json:"from"`
 	BaseSHA           string    `json:"baseSha"`
 	OutputBranch      string    `json:"outputBranch"`
@@ -44,6 +45,7 @@ type Metadata struct {
 	Error             string    `json:"error,omitempty"`
 	Warning           string    `json:"warning,omitempty"`
 	StartedAt         time.Time `json:"startedAt"`
+	UpdatedAt         time.Time `json:"updatedAt,omitzero"`
 	CompletedAt       time.Time `json:"completedAt,omitempty"`
 	Workspace         string    `json:"workspace"`
 	WorkspaceVolume   string    `json:"workspaceVolume,omitempty"`
@@ -73,6 +75,7 @@ func (s Store) WriteMetadata(metadata Metadata) error {
 	if err != nil {
 		return err
 	}
+	metadata.UpdatedAt = time.Now().UTC()
 	data, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
 		return err

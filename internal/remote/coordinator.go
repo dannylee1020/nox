@@ -90,16 +90,17 @@ func (c *Coordinator) Execute(parent context.Context, runID string, request RunR
 	orchestrator := run.New()
 	orchestrator.Git = git
 	result, err := orchestrator.Launch(ctx, run.Config{
-		RunID:        runID,
-		Repo:         source,
-		From:         request.BaseCommit,
-		OutputBranch: "nox/" + runID,
-		Task:         request.Task,
-		Validation:   request.Validation,
-		Network:      request.Network,
-		CodexHome:    c.config.CodexHome,
-		StateRoot:    filepath.Join(c.config.StateRoot, "runs"),
-		Timeout:      timeout,
+		RunID:           runID,
+		Repo:            source,
+		RepositoryLabel: request.Repository,
+		From:            request.BaseCommit,
+		OutputBranch:    "nox/" + runID,
+		Task:            request.Task,
+		Validation:      request.Validation,
+		Network:         request.Network,
+		CodexHome:       c.config.CodexHome,
+		StateRoot:       filepath.Join(c.config.StateRoot, "runs"),
+		Timeout:         timeout,
 	})
 	if err != nil {
 		return Publication{}, err

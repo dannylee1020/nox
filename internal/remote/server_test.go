@@ -48,7 +48,8 @@ func TestServerHealthDoesNotRequireAuthentication(t *testing.T) {
 }
 
 func TestServerRequiresBearerTokenAndStartsRun(t *testing.T) {
-	server, err := NewServer(ServerConfig{APIToken: "secret", Executor: fakeExecutor{}, MaxConcurrentRuns: 1})
+	statusRoot := t.TempDir()
+	server, err := NewServer(ServerConfig{APIToken: "secret", Executor: fakeExecutor{}, MaxConcurrentRuns: 1, StatusRoot: statusRoot})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,12 +73,19 @@ func TestServerRequiresBearerTokenAndStartsRun(t *testing.T) {
 	if status.RunID == "" || status.State != StateQueued {
 		t.Fatalf("status = %#v", status)
 	}
+	if records, _, warnings := LoadJobRecords(statusRoot); len(warnings) != 0 || len(records) != 1 || records[0].Repository != "acme/demo" {
+		t.Fatalf("persisted records = %#v, warnings = %v", records, warnings)
+	}
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		server.mu.RLock()
 		current := server.jobs[status.RunID].status
 		server.mu.RUnlock()
 		if current.State == StateCompleted {
+			records, _, warnings := LoadJobRecords(statusRoot)
+			if len(warnings) != 0 || len(records) != 1 || records[0].State != StateCompleted || records[0].PullRequestURL == "" {
+				t.Fatalf("terminal records = %#v, warnings = %v", records, warnings)
+			}
 			nextRequest := httptest.NewRequest(http.MethodPost, "/v1/runs", strings.NewReader(string(payload)))
 			nextRequest.Header.Set("Authorization", "Bearer secret")
 			next := httptest.NewRecorder()

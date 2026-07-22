@@ -209,7 +209,7 @@ func watchActiveRuns(ctx context.Context, st store.Store, interval time.Duration
 
 func stdinIsInteractive(stdin *os.File) bool {
 	info, err := stdin.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+	return err == nil && info.Mode()&os.ModeCharDevice != 0 && isTerminal(stdin.Fd())
 }
 
 func watchRemoteRun(ctx context.Context, client *remote.Client, id string, interval time.Duration, output, status io.Writer) error {

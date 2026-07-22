@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -226,6 +227,17 @@ func TestWatchRemoteRequiresRunID(t *testing.T) {
 	err := watch([]string{"--remote"})
 	if err == nil || !strings.Contains(err.Error(), "remote watch requires a run ID") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestDevNullIsNotInteractive(t *testing.T) {
+	file, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if stdinIsInteractive(file) {
+		t.Fatal("os.DevNull must not be treated as an interactive terminal")
 	}
 }
 
