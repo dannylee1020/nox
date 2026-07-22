@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>Nox</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <a class="skip-link" href="#run-detail">Skip to run detail</a>
+  <header class="topbar">
+    <div class="identity">
+      <h1>Nox</h1>
+    </div>
+  </header>
+
+  <dl class="telemetry" aria-label="Run summary">
+    <div><dd id="count-active">0</dd><dt>active</dt></div>
+    <div><dd id="count-validating">0</dd><dt>validating</dt></div>
+    <div><dd id="count-completed">0</dd><dt>completed</dt></div>
+    <div><dd id="count-failed">0</dd><dt>failed</dt></div>
+  </dl>
+
+  <div id="warning" class="warning" role="status" hidden></div>
+
+  <main class="console-shell">
+    <aside class="run-pane" aria-label="Runs">
+      <div class="pane-heading">
+        <h2 class="visually-hidden">Runs</h2>
+        <p id="run-count" class="visually-hidden">Loading evidence</p>
+        <div class="filters" aria-label="Filter runs">
+          <button type="button" data-filter="active" aria-pressed="true">Active</button>
+          <button type="button" data-filter="recent" aria-pressed="false">Recent</button>
+          <button type="button" data-filter="failed" aria-pressed="false">Failed</button>
+        </div>
+      </div>
+      <div id="run-list" class="run-list" aria-busy="true">
+        <div class="skeleton-row"></div>
+        <div class="skeleton-row"></div>
+        <div class="skeleton-row"></div>
+      </div>
+    </aside>
+
+    <section id="run-detail" class="detail-pane" tabindex="-1" aria-label="Run detail">
+      <div id="detail-content" hidden>
+        <header class="detail-header">
+          <dl class="run-facts">
+            <div><dt>Repository:</dt><dd id="repository"></dd></div>
+            <div><dt>State:</dt><dd id="state-badge" class="state-badge"></dd></div>
+            <div><dt>Run ID:</dt><dd><code id="run-id"></code></dd></div>
+            <div><dt>Source:</dt><dd id="source-badge" class="source-badge"></dd></div>
+          </dl>
+        </header>
+
+        <div class="lifecycle-panel">
+          <ol id="lifecycle" class="lifecycle" aria-label="Run lifecycle"></ol>
+          <p id="run-substage" class="run-substage"></p>
+        </div>
+
+        <div id="run-message" class="run-message" role="status" hidden></div>
+
+        <dl class="metadata-grid">
+          <div><dt>Base:</dt><dd><code id="base-ref"></code></dd></div>
+          <div><dt>Validation:</dt><dd id="validation"></dd></div>
+          <div><dt>Elapsed:</dt><dd id="elapsed"></dd></div>
+          <div><dt>Output branch:</dt><dd><code id="output-branch"></code></dd></div>
+          <div><dt>Result commit:</dt><dd><code id="result-commit"></code></dd></div>
+          <div><dt>Publication:</dt><dd id="publication"></dd></div>
+        </dl>
+
+        <section class="evidence" aria-labelledby="evidence-title">
+          <h3 id="evidence-title" class="visually-hidden">Run logs</h3>
+          <div class="log-toolbar">
+            <div class="log-tabs" role="tablist" aria-label="Run logs">
+              <button type="button" role="tab" data-log="setup" aria-controls="log-output" aria-selected="true" tabindex="0">Logs</button>
+              <button type="button" role="tab" data-log="agent" aria-controls="log-output" aria-selected="false" tabindex="-1">Agent</button>
+              <button type="button" role="tab" data-log="validation" aria-controls="log-output" aria-selected="false" tabindex="-1">Validation</button>
+            </div>
+            <div class="log-actions">
+              <button id="toggle-log-size" class="expand-logs" type="button" aria-expanded="false">Expand logs</button>
+              <label class="follow-toggle">
+                <input id="follow-log" type="checkbox" checked>
+                Follow output
+              </label>
+            </div>
+          </div>
+          <pre id="log-output" tabindex="0" aria-live="off"><code>Waiting for log output…</code></pre>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app-state.js" defer></script>
+  <script src="/app.js" defer></script>
+</body>
+</html>
