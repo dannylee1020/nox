@@ -15,15 +15,18 @@ type fakeExecutor struct {
 	block <-chan struct{}
 }
 
-func (f fakeExecutor) Execute(ctx context.Context, runID string, request RunRequest) (Publication, error) {
+func (f fakeExecutor) Execute(ctx context.Context, runID string, request RunRequest) (ExecutionResult, error) {
 	if f.block != nil {
 		select {
 		case <-f.block:
 		case <-ctx.Done():
-			return Publication{}, ctx.Err()
+			return ExecutionResult{}, ctx.Err()
 		}
 	}
-	return Publication{Branch: "nox/" + runID, Commit: "abc123", PullRequestURL: "https://github.com/acme/demo/pull/1"}, nil
+	if request.Mode == "test" {
+		return ExecutionResult{Mode: "test", SourceIntegrity: "passed"}, nil
+	}
+	return ExecutionResult{Mode: request.Mode, Publication: &Publication{Branch: "nox/" + runID, Commit: "abc123", PullRequestURL: "https://github.com/acme/demo/pull/1"}}, nil
 }
 
 func validRequest() RunRequest {
@@ -93,11 +96,57 @@ func TestServerRequiresBearerTokenAndStartsRun(t *testing.T) {
 			if next.Code != http.StatusAccepted {
 				t.Fatalf("status after completion = %d, body = %s", next.Code, next.Body.String())
 			}
-			return
+			cleanupDeadline := time.Now().Add(time.Second)
+			for time.Now().Before(cleanupDeadline) {
+				server.mu.RLock()
+				active := len(server.active)
+				server.mu.RUnlock()
+				if active == 0 {
+					return
+				}
+				time.Sleep(time.Millisecond)
+			}
+			t.Fatal("replacement run did not finish")
 		}
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatal("run did not complete")
+}
+
+func TestServerCompletesTestWithoutPublication(t *testing.T) {
+	server, err := NewServer(ServerConfig{APIToken: "secret", Executor: fakeExecutor{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := validRequest()
+	request.Mode = "test"
+	request.Title = ""
+	payload, _ := json.Marshal(request)
+	record := httptest.NewRecorder()
+	httpRequest := httptest.NewRequest(http.MethodPost, "/v1/runs", strings.NewReader(string(payload)))
+	httpRequest.Header.Set("Authorization", "Bearer secret")
+	server.Handler().ServeHTTP(record, httpRequest)
+	if record.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %s", record.Code, record.Body.String())
+	}
+	var status RunStatus
+	if err := json.Unmarshal(record.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		server.mu.RLock()
+		current := server.jobs[status.RunID].status
+		server.mu.RUnlock()
+		if current.State == StateCompleted {
+			if current.Mode != "test" || current.Branch != "" || current.PullRequestURL != "" || current.SourceIntegrity != "passed" {
+				t.Fatalf("test status = %#v", current)
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("test run did not complete")
 }
 
 func TestServerEnforcesMaxConcurrentRuns(t *testing.T) {

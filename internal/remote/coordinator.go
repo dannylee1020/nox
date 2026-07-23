@@ -47,19 +47,27 @@ func NewCoordinator(config CoordinatorConfig) *Coordinator {
 	return &Coordinator{config: config}
 }
 
-func (c *Coordinator) Execute(parent context.Context, runID string, request RunRequest) (Publication, error) {
+func (c *Coordinator) Execute(parent context.Context, runID string, request RunRequest) (ExecutionResult, error) {
 	owner, repository, err := ParseRepository(request.Repository)
 	if err != nil {
-		return Publication{}, err
+		return ExecutionResult{}, err
 	}
 	if len(request.BaseCommit) != 40 {
-		return Publication{}, fmt.Errorf("baseCommit must be a 40-character commit SHA")
+		return ExecutionResult{}, fmt.Errorf("baseCommit must be a 40-character commit SHA")
 	}
-	if request.BaseBranch == "" || request.Title == "" || request.Task == "" || request.Validation == "" {
-		return Publication{}, fmt.Errorf("baseBranch, title, task, and validation are required")
+	intent, err := run.ParseIntent(request.Mode)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	request.Mode = string(intent)
+	if request.BaseBranch == "" || request.Task == "" || request.Validation == "" {
+		return ExecutionResult{}, fmt.Errorf("baseBranch, task, and validation are required")
+	}
+	if intent == run.IntentFeat && request.Title == "" {
+		return ExecutionResult{}, fmt.Errorf("title is required for feat mode")
 	}
 	if request.Network != "online" && request.Network != "none" {
-		return Publication{}, fmt.Errorf("network must be online or none")
+		return ExecutionResult{}, fmt.Errorf("network must be online or none")
 	}
 	timeout := time.Duration(request.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
@@ -69,11 +77,11 @@ func (c *Coordinator) Execute(parent context.Context, runID string, request RunR
 	defer cancel()
 
 	if err := os.MkdirAll(c.config.StateRoot, 0o700); err != nil {
-		return Publication{}, fmt.Errorf("create remote state root: %w", err)
+		return ExecutionResult{}, fmt.Errorf("create remote state root: %w", err)
 	}
 	credentials, err := newGitCredentials(c.config.StateRoot, runID, c.config.GitHubToken)
 	if err != nil {
-		return Publication{}, err
+		return ExecutionResult{}, err
 	}
 	defer credentials.Close()
 	git := gitx.Git{Runner: c.config.CommandRunner, Env: credentials.Env()}
@@ -81,10 +89,12 @@ func (c *Coordinator) Execute(parent context.Context, runID string, request RunR
 	defer os.RemoveAll(source)
 	remoteURL := fmt.Sprintf("https://github.com/%s/%s.git", owner, repository)
 	if err := git.CloneAt(ctx, remoteURL, request.BaseCommit, source); err != nil {
-		return Publication{}, err
+		return ExecutionResult{}, err
 	}
-	if err := configureIdentity(ctx, git, source, c.config.GitName, c.config.GitEmail); err != nil {
-		return Publication{}, err
+	if intent == run.IntentFeat {
+		if err := configureIdentity(ctx, git, source, c.config.GitName, c.config.GitEmail); err != nil {
+			return ExecutionResult{}, err
+		}
 	}
 
 	orchestrator := run.New()
@@ -94,7 +104,8 @@ func (c *Coordinator) Execute(parent context.Context, runID string, request RunR
 		Repo:            source,
 		RepositoryLabel: request.Repository,
 		From:            request.BaseCommit,
-		OutputBranch:    "nox/" + runID,
+		Intent:          intent,
+		OutputBranch:    outputBranch(intent, runID),
 		Task:            request.Task,
 		Validation:      request.Validation,
 		Network:         request.Network,
@@ -103,22 +114,32 @@ func (c *Coordinator) Execute(parent context.Context, runID string, request RunR
 		Timeout:         timeout,
 	})
 	if err != nil {
-		return Publication{}, err
+		return ExecutionResult{}, err
+	}
+	if intent == run.IntentTest {
+		return ExecutionResult{Mode: string(intent), SourceIntegrity: result.Metadata.SourceIntegrity, ValidationCode: result.Metadata.ValidationCode}, nil
 	}
 	if result.NoChanges {
-		return Publication{Branch: "nox/" + runID, NoChanges: true}, nil
+		return ExecutionResult{Mode: string(intent), SourceIntegrity: result.Metadata.SourceIntegrity, ValidationCode: result.Metadata.ValidationCode, Publication: &Publication{Branch: "nox/" + runID, NoChanges: true}}, nil
 	}
 	branch := result.Metadata.OutputBranch
 	if err := git.Push(ctx, source, "origin", branch); err != nil {
-		return Publication{}, err
+		return ExecutionResult{}, err
 	}
 	body := fmt.Sprintf("## Nox remote run\n\n- Run: `%s`\n- Base commit: `%s`\n- Result commit: `%s`\n- Validation: `%s`\n- Isolation: Docker with gVisor `runsc`\n", runID, result.Metadata.BaseSHA, result.Metadata.ResultSHA, request.Validation)
 	pullRequestURL, err := c.config.GitHubClient.CreatePullRequest(ctx, owner, repository, request.BaseBranch, branch, request.Title, body)
 	if err != nil {
 		_ = c.config.GitHubClient.DeleteBranch(context.Background(), owner, repository, branch)
-		return Publication{}, err
+		return ExecutionResult{}, err
 	}
-	return Publication{Branch: branch, Commit: result.Metadata.ResultSHA, PullRequestURL: pullRequestURL}, nil
+	return ExecutionResult{Mode: string(intent), SourceIntegrity: result.Metadata.SourceIntegrity, ValidationCode: result.Metadata.ValidationCode, Publication: &Publication{Branch: branch, Commit: result.Metadata.ResultSHA, PullRequestURL: pullRequestURL}}, nil
+}
+
+func outputBranch(intent run.Intent, runID string) string {
+	if intent == run.IntentTest {
+		return ""
+	}
+	return "nox/" + runID
 }
 
 func configureIdentity(ctx context.Context, git gitx.Git, repo, name, email string) error {

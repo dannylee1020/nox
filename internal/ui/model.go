@@ -32,23 +32,25 @@ type Model struct {
 }
 
 type Run struct {
-	RunID          string    `json:"runId"`
-	Source         string    `json:"source"`
-	Repository     string    `json:"repository"`
-	Title          string    `json:"title,omitempty"`
-	BaseRef        string    `json:"baseRef,omitempty"`
-	State          string    `json:"state"`
-	Stage          string    `json:"stage,omitempty"`
-	Validation     string    `json:"validation"`
-	OutputBranch   string    `json:"outputBranch,omitempty"`
-	ResultCommit   string    `json:"resultCommit,omitempty"`
-	PullRequestURL string    `json:"pullRequestUrl,omitempty"`
-	Error          string    `json:"error,omitempty"`
-	Warning        string    `json:"warning,omitempty"`
-	StartedAt      time.Time `json:"startedAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
-	CompletedAt    time.Time `json:"completedAt,omitzero"`
-	ElapsedSeconds int64     `json:"elapsedSeconds"`
+	RunID           string    `json:"runId"`
+	Mode            string    `json:"mode,omitempty"`
+	Source          string    `json:"source"`
+	Repository      string    `json:"repository"`
+	Title           string    `json:"title,omitempty"`
+	BaseRef         string    `json:"baseRef,omitempty"`
+	State           string    `json:"state"`
+	Stage           string    `json:"stage,omitempty"`
+	Validation      string    `json:"validation"`
+	SourceIntegrity string    `json:"sourceIntegrity,omitempty"`
+	OutputBranch    string    `json:"outputBranch,omitempty"`
+	ResultCommit    string    `json:"resultCommit,omitempty"`
+	PullRequestURL  string    `json:"pullRequestUrl,omitempty"`
+	Error           string    `json:"error,omitempty"`
+	Warning         string    `json:"warning,omitempty"`
+	StartedAt       time.Time `json:"startedAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
+	CompletedAt     time.Time `json:"completedAt,omitzero"`
+	ElapsedSeconds  int64     `json:"elapsedSeconds"`
 }
 
 type Counts struct {
@@ -180,9 +182,9 @@ func runFromMetadata(metadata store.Metadata, now time.Time) Run {
 		updated = metadata.StartedAt
 	}
 	current := Run{
-		RunID: metadata.RunID, Source: "local", Repository: repository,
+		RunID: metadata.RunID, Mode: metadata.Intent, Source: "local", Repository: repository,
 		BaseRef: metadata.From, State: string(metadata.State), Stage: string(metadata.State),
-		Validation: validationState(string(metadata.State)), OutputBranch: metadata.OutputBranch,
+		Validation: validationState(string(metadata.State)), SourceIntegrity: metadata.SourceIntegrity, OutputBranch: metadata.OutputBranch,
 		ResultCommit: metadata.ResultSHA, Error: metadata.Error, Warning: metadata.Warning,
 		StartedAt: metadata.StartedAt, UpdatedAt: updated, CompletedAt: metadata.CompletedAt,
 	}
@@ -208,6 +210,7 @@ func mergeRemote(current Run, hasMetadata bool, record remote.JobRecord, marker 
 		}
 	}
 	current.RunID = record.RunID
+	current.Mode = record.Mode
 	current.Source = "remote"
 	current.Repository = record.Repository
 	current.Title = record.Title
@@ -215,6 +218,7 @@ func mergeRemote(current Run, hasMetadata bool, record remote.JobRecord, marker 
 	current.State = state
 	current.Stage = stage
 	current.Validation = validationState(state)
+	current.SourceIntegrity = record.SourceIntegrity
 	current.PullRequestURL = record.PullRequestURL
 	if record.Branch != "" {
 		current.OutputBranch = record.Branch
@@ -238,7 +242,7 @@ func mergeRemote(current Run, hasMetadata bool, record remote.JobRecord, marker 
 
 func validationState(state string) string {
 	switch state {
-	case string(store.StateValidating):
+	case string(store.StateValidating), string(store.StateChecking):
 		return "running"
 	case string(store.StatePublishing), string(store.StateCompleted), remote.StateNoChanges:
 		return "passed"

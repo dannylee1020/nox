@@ -11,6 +11,9 @@ func TestMetadataRoundTripPreservesWorkspaceResources(t *testing.T) {
 	st := New(t.TempDir())
 	want := Metadata{
 		RunID:             "abc123",
+		Intent:            "test",
+		SourceIntegrity:   "passed",
+		BaselineVolume:    "nox-abc123-baseline",
 		Workspace:         "/tmp/run/workspace",
 		WorkspaceVolume:   "nox-abc123-workspace",
 		WorkspaceExported: true,
@@ -26,7 +29,7 @@ func TestMetadataRoundTripPreservesWorkspaceResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.WorkspaceVolume != want.WorkspaceVolume || !got.WorkspaceExported || got.CodexVolume != want.CodexVolume {
+	if got.WorkspaceVolume != want.WorkspaceVolume || !got.WorkspaceExported || got.CodexVolume != want.CodexVolume || got.Intent != "test" || got.SourceIntegrity != "passed" || got.BaselineVolume == "" {
 		t.Fatalf("workspace resources = %#v", got)
 	}
 }

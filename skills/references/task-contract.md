@@ -2,7 +2,7 @@
 
 The main-thread agent creates this contract before launching Nox. It consolidates the user's invocation with relevant context from the current thread so the sandbox agent can execute and test the delegated work without access to the parent conversation.
 
-The contract borrows broadly useful intent and execution fields from KKT without requiring constraint optimization, candidate comparison, scoring, or KKT tooling. Preserve the user's meaning and useful source material; do not invent content merely to fill a section. Keep arbitrary Markdown when it communicates the source context best.
+The contract borrows broadly useful intent and execution fields from KKT without requiring constraint optimization, candidate comparison, scoring, or KKT tooling. Preserve the user's meaning and useful source material; do not invent content merely to fill a section. Keep arbitrary Markdown when it communicates the source context best. When the run is test mode, the contract must make the tester's single responsibility explicit: construct the runtime environment, imitate the real-world user flow, observe/report findings, and do not implement or modify tracked source.
 
 Use every top-level section below for a stable handoff shape. When a section has no relevant content, write `None specified` rather than manufacturing requirements. `Context and extra` is the lossless escape hatch for useful information that does not fit elsewhere.
 
@@ -67,7 +67,7 @@ Execute and test the delegated work described in this contract. Preserve the sup
 - `Soft` constraints express preferences, not requirements. Do not sacrifice a hard constraint to satisfy one.
 - `Plan and decisions` carries an existing plan when the thread has one. Do not run KKT or manufacture a detailed plan merely to populate it.
 - `Affected surfaces` may describe code paths or higher-level behavior. Do not guess exact files when they are unknown.
-- `Acceptance criteria` define completion; `Validation` defines how completion will be checked and what evidence should result.
+- `Acceptance criteria` define completion; `Validation` defines how completion will be checked and what evidence should result. For test mode, Nox independently executes the supplied validation command and checks tracked-source integrity; the agent's report is evidence, not a substitute for either gate.
 - `Stop conditions` include unresolved product decisions, destructive or out-of-scope work, unavailable prerequisites, and contradictions that prevent faithful execution.
 - `Context and extra` preserves useful unmatched information instead of dropping it or forcing it into an unsuitable field.
 

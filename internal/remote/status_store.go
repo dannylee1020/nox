@@ -23,6 +23,9 @@ type JobRecord struct {
 	SchemaVersion    int       `json:"schemaVersion"`
 	ServerInstanceID string    `json:"serverInstanceId"`
 	RunID            string    `json:"runId"`
+	Mode             string    `json:"mode,omitempty"`
+	SourceIntegrity  string    `json:"sourceIntegrity,omitempty"`
+	ValidationCode   int       `json:"validationCode,omitempty"`
 	Repository       string    `json:"repository"`
 	BaseBranch       string    `json:"baseBranch"`
 	BaseCommit       string    `json:"baseCommit"`

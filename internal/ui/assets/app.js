@@ -258,6 +258,7 @@
     document.querySelector("#repository").title = repositoryValue;
     setText("#run-id", run.runId);
     setText("#source-badge", run.source === "remote" ? "REMOTE" : "LOCAL");
+    setText("#run-mode", run.mode === "test" ? "TEST" : "FEATURE");
     const summary = stageSummary(run);
     setText("#run-substage", summary.detail);
     const badge = document.querySelector("#state-badge");
@@ -265,6 +266,7 @@
     badge.dataset.tone = stateTone(run.state);
     setText("#elapsed", formatDuration(run.elapsedSeconds));
     setText("#validation", humanize(run.validation));
+    setText("#source-integrity", run.sourceIntegrity ? humanize(run.sourceIntegrity) : run.mode === "test" ? "Pending" : "Not applicable");
     setText("#base-ref", run.baseRef || "Not recorded");
     setText("#output-branch", run.outputBranch || "Pending");
     setText("#result-commit", run.resultCommit ? run.resultCommit.slice(0, 12) : "Pending");
@@ -285,7 +287,7 @@
       target.append(link);
       return;
     }
-    target.textContent = run.state === "no_changes" ? "No changes" : run.outputBranch ? "Branch ready" : "Pending";
+    target.textContent = run.mode === "test" && run.state === "completed" ? "Evidence only" : run.state === "no_changes" ? "No changes" : run.outputBranch ? "Branch ready" : "Pending";
   }
 
   function renderLifecycle(run) {

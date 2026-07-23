@@ -15,6 +15,7 @@ import (
 	"github.com/nox-dev/nox/internal/execx"
 	"github.com/nox-dev/nox/internal/gitx"
 	"github.com/nox-dev/nox/internal/remote"
+	"github.com/nox-dev/nox/internal/run"
 )
 
 func submit(args []string) error {
@@ -22,7 +23,8 @@ func submit(args []string) error {
 	fs.SetOutput(os.Stderr)
 	repo := fs.String("repo", ".", "local Git repository")
 	from := fs.String("from", "", "GitHub base branch to submit")
-	title := fs.String("title", "", "pull request title")
+	mode := fs.String("mode", "feat", "run mode: feat or test")
+	title := fs.String("title", "", "pull request title (feat mode only)")
 	task := fs.String("task", "", "agent task")
 	taskFile := fs.String("task-file", "", "file containing the agent task")
 	validate := fs.String("validate", "", "explicit validation command")
@@ -37,14 +39,18 @@ func submit(args []string) error {
 		}
 		return err
 	}
+	intent, err := run.ParseIntent(*mode)
+	if err != nil {
+		return err
+	}
+	if intent == run.IntentFeat && strings.TrimSpace(*title) == "" {
+		return errors.New("--title is required for feat mode")
+	}
 	if *task != "" && *taskFile != "" {
 		return errors.New("use only one of --task and --task-file")
 	}
 	if *task == "" && *taskFile == "" {
 		return errors.New("one of --task or --task-file is required")
-	}
-	if strings.TrimSpace(*title) == "" {
-		return errors.New("--title is required")
 	}
 	if strings.TrimSpace(*validate) == "" {
 		return errors.New("--validate is required")
@@ -110,6 +116,7 @@ func submit(args []string) error {
 		Repository:     repository,
 		BaseBranch:     baseBranch,
 		BaseCommit:     baseCommit,
+		Mode:           string(intent),
 		Title:          strings.TrimSpace(*title),
 		Task:           *task,
 		Validation:     *validate,
@@ -156,6 +163,10 @@ func submit(args []string) error {
 }
 
 func printSubmitResult(status remote.RunStatus) error {
+	if status.Mode == string(run.IntentTest) && status.State == remote.StateCompleted {
+		fmt.Printf("completed: remote test run %s; validation evidence retained on the worker\n", status.RunID)
+		return nil
+	}
 	switch status.State {
 	case remote.StateCompleted:
 		fmt.Printf("completed: remote run %s\n", status.RunID)
@@ -173,6 +184,9 @@ func printSubmitResult(status remote.RunStatus) error {
 }
 
 func submitStatusError(status remote.RunStatus) error {
+	if status.Mode == string(run.IntentTest) && status.State == remote.StateCompleted {
+		return nil
+	}
 	switch status.State {
 	case remote.StateCompleted:
 		if status.PullRequestURL == "" {

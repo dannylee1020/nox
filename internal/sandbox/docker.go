@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -76,6 +77,10 @@ func (d Docker) Doctor(ctx context.Context, image string) error {
 
 func (d Docker) CreateWorkspaceVolume(ctx context.Context, runID string) (string, error) {
 	return d.createManagedVolume(ctx, WorkspaceVolumeName(runID), runID, "workspace")
+}
+
+func (d Docker) CreateBaselineVolume(ctx context.Context, runID string) (string, error) {
+	return d.createManagedVolume(ctx, "nox-"+runID+"-baseline", runID, "baseline")
 }
 
 func (d Docker) CreateCodexVolume(ctx context.Context, runID string) (string, error) {
@@ -236,6 +241,92 @@ func (d Docker) createWorkspaceHelper(ctx context.Context, volume, image, runID,
 	}
 	return Container{ID: id}, nil
 }
+
+func (d Docker) CheckWorkspaceUnchanged(ctx context.Context, candidateVolume, baselineVolume, image, runID string) (string, error) {
+	if candidateVolume == "" || baselineVolume == "" || image == "" || runID == "" {
+		return "", fmt.Errorf("candidate volume, baseline volume, image, and run id are required")
+	}
+	helper, err := d.createIntegrityHelper(ctx, candidateVolume, baselineVolume, image, runID)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = d.Remove(context.Background(), helper) }()
+	if err := d.Start(ctx, helper); err != nil {
+		return "", fmt.Errorf("start integrity helper: %w", err)
+	}
+	var stdout, stderr bytes.Buffer
+	result, execErr := d.Exec(ctx, helper, []string{"node", "-e", integrityCheckScript}, nil, &stdout, &stderr)
+	if execErr != nil || result.ExitCode != 0 {
+		detail := strings.TrimSpace(strings.TrimSpace(stderr.String()) + " " + strings.TrimSpace(stdout.String()))
+		if detail == "" {
+			detail = fmt.Sprintf("integrity helper exited with code %d", result.ExitCode)
+		}
+		return detail, fmt.Errorf("tracked source integrity check failed: %s", detail)
+	}
+	return "", nil
+}
+
+func (d Docker) createIntegrityHelper(ctx context.Context, candidateVolume, baselineVolume, image, runID string) (Container, error) {
+	name := "nox-" + runID + "-integrity"
+	result, err := d.Runner.Run(ctx, execx.Command{Name: "docker", Args: []string{
+		"create",
+		"--runtime", "runsc",
+		"--name", name,
+		"--label", "io.nox.managed=true",
+		"--label", "io.nox.run-id=" + runID,
+		"--label", "io.nox.kind=integrity-helper",
+		"--user", "0:0",
+		"--security-opt", "no-new-privileges:true",
+		"--network", "none",
+		"--mount", "type=volume,src=" + candidateVolume + ",dst=/candidate,readonly",
+		"--mount", "type=volume,src=" + baselineVolume + ",dst=/baseline,readonly",
+		image, "sleep", "infinity",
+	}})
+	if err != nil {
+		return Container{}, fmt.Errorf("create integrity helper: %w", err)
+	}
+	id := strings.TrimSpace(result.Stdout)
+	if id == "" {
+		return Container{}, fmt.Errorf("Docker returned an empty integrity helper id")
+	}
+	return Container{ID: id}, nil
+}
+
+const integrityCheckScript = `const fs = require("fs");
+const path = require("path");
+const child = require("child_process");
+const listed = child.spawnSync("git", ["-c", "safe.directory=/baseline", "-C", "/baseline", "ls-files", "-z"], {encoding: "buffer"});
+if (listed.status !== 0) {
+  process.stderr.write("trusted baseline file list failed\n" + (listed.stderr || ""));
+  process.exit(2);
+}
+const files = listed.stdout.toString().split("\0").filter(Boolean);
+const changed = [];
+const safePath = (root, name) => {
+  if (path.isAbsolute(name) || name.split("/").includes("..")) return null;
+  return path.join(root, name);
+};
+const kind = (entry) => entry.isSymbolicLink() ? "link" : entry.isFile() ? "file" : entry.isDirectory() ? "directory" : "other";
+for (const name of files) {
+  const baseline = safePath("/baseline", name);
+  const candidate = safePath("/candidate", name);
+  if (!baseline || !candidate) { changed.push(name); continue; }
+  let expected, actual;
+  try { expected = fs.lstatSync(baseline); } catch (_) { changed.push(name); continue; }
+  try { actual = fs.lstatSync(candidate); } catch (_) { changed.push(name); continue; }
+  if (kind(expected) !== kind(actual)) { changed.push(name); continue; }
+  if (kind(expected) === "link") {
+    if (fs.readlinkSync(baseline) !== fs.readlinkSync(candidate)) changed.push(name);
+    continue;
+  }
+  if (kind(expected) !== "file" || ((expected.mode & 0o111) !== (actual.mode & 0o111)) || !fs.readFileSync(baseline).equals(fs.readFileSync(candidate))) changed.push(name);
+}
+if (changed.length) {
+  for (const name of changed.slice(0, 50)) process.stderr.write("changed tracked path: " + name + "\n");
+  if (changed.length > 50) process.stderr.write("and " + (changed.length - 50) + " more tracked paths\n");
+  process.exit(1);
+}
+process.stdout.write("tracked source integrity passed\n");`
 
 func (d Docker) Start(ctx context.Context, container Container) error {
 	if _, err := d.Runner.Run(ctx, execx.Command{Name: "docker", Args: []string{"start", container.ID}}); err != nil {

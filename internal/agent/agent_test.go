@@ -41,3 +41,22 @@ func TestCodexPromptAddsExecutionEnvelopeWithoutRewritingContract(t *testing.T) 
 		t.Fatalf("prompt does not preserve contract as its final payload: %q", got)
 	}
 }
+
+func TestCodexPromptGivesTestModeOnlyTesterResponsibility(t *testing.T) {
+	got := (Codex{}).Prompt(PromptContext{
+		Task: "test contract", BaseSHA: "base", Validation: "npm run e2e", Intent: "test",
+	})
+	for _, want := range []string{
+		"Act only as an end-to-end tester",
+		"Do not implement fixes",
+		"Imitate the real-world user workflow",
+		"Nox will run the required validation independently",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("tester prompt missing %q: %s", want, got)
+		}
+	}
+	if strings.Contains(got, "create a branch") {
+		t.Fatalf("tester prompt included publication guidance: %s", got)
+	}
+}

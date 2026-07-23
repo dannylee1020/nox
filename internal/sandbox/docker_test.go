@@ -98,6 +98,30 @@ func TestCreateUsesRunscAndMinimumGuardrails(t *testing.T) {
 	}
 }
 
+func TestCheckWorkspaceUnchangedUsesReadOnlyTrustedBaseline(t *testing.T) {
+	fake := &fakeRunner{}
+	detail, err := (Docker{Runner: fake}).CheckWorkspaceUnchanged(context.Background(), "candidate", "baseline", "nox-runner:v0", "abc123")
+	if err != nil || detail != "" {
+		t.Fatalf("integrity check = %q, %v", detail, err)
+	}
+	args := strings.Join(fake.commands[0].Args, " ")
+	for _, want := range []string{"--runtime runsc", "io.nox.kind=integrity-helper", "src=candidate,dst=/candidate,readonly", "src=baseline,dst=/baseline,readonly"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("integrity helper args missing %q: %s", want, args)
+		}
+	}
+	foundScript := false
+	for _, command := range fake.commands {
+		if strings.Contains(strings.Join(command.Args, " "), "node -e") {
+			foundScript = true
+			break
+		}
+	}
+	if !foundScript {
+		t.Fatalf("integrity script was not executed: %v", fake.commands)
+	}
+}
+
 func TestRepositorySetupProtectsWorkspace(t *testing.T) {
 	fake := &fakeRunner{}
 	_, err := (Docker{Runner: fake}).RunRepositorySetup(context.Background(), Container{ID: "container-id"}, io.Discard, io.Discard)

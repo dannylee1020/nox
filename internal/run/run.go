@@ -24,6 +24,7 @@ type Config struct {
 	Repo            string
 	RepositoryLabel string
 	From            string
+	Intent          Intent
 	OutputBranch    string
 	Task            string
 	Validation      string
@@ -99,8 +100,18 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 	if config.StateRoot != "" {
 		o.Store = store.New(config.StateRoot)
 	}
-	if strings.TrimSpace(config.From) == "" || strings.TrimSpace(config.OutputBranch) == "" {
-		return result, fmt.Errorf("--from and --output-branch are required")
+	config.Intent, err = ParseIntent(string(config.Intent))
+	if err != nil {
+		return result, err
+	}
+	if strings.TrimSpace(config.From) == "" {
+		return result, fmt.Errorf("--from is required")
+	}
+	if config.Intent == IntentFeat && strings.TrimSpace(config.OutputBranch) == "" {
+		return result, fmt.Errorf("--output-branch is required for feat mode")
+	}
+	if config.Intent == IntentTest && strings.TrimSpace(config.OutputBranch) != "" {
+		return result, fmt.Errorf("--output-branch cannot be used in test mode")
 	}
 	if strings.TrimSpace(config.Validation) == "" {
 		return result, fmt.Errorf("--validate is required")
@@ -125,12 +136,13 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 	}
 	workspace := filepath.Join(runDir, "workspace")
 	metadata := store.Metadata{
-		RunID: id, Repo: config.Repo, RepositoryLabel: config.RepositoryLabel, From: config.From, OutputBranch: config.OutputBranch,
+		RunID: id, Intent: string(config.Intent), Repo: config.Repo, RepositoryLabel: config.RepositoryLabel, From: config.From, OutputBranch: config.OutputBranch,
 		Agent: adapter.Name(), AgentPermissions: adapter.PermissionMode(), Validation: config.Validation,
 		Network: config.Network, Image: config.Image, State: store.StateInitializing,
 		StartedAt: time.Now(), Workspace: workspace,
 	}
 	var workspaceVolume string
+	var baselineVolume string
 	var codexVolume string
 	var workspaceExported bool
 	var container sandbox.Container
@@ -161,10 +173,13 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 		return o.Store.WriteMetadata(metadata)
 	}
 	fail := func(failErr error) (Result, error) {
-		if workspaceVolume != "" && !workspaceExported {
+		if config.Intent == IntentFeat && workspaceVolume != "" && !workspaceExported {
 			if exportErr := exportWorkspace(); exportErr != nil {
 				failErr = fmt.Errorf("%w; export workspace: %v", failErr, exportErr)
 			}
+		}
+		if config.Intent == IntentTest {
+			_ = o.Store.RemoveWorkspace(id)
 		}
 		if IsCancelled(failErr) {
 			terminalState = store.StateCancelled
@@ -172,7 +187,7 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 			terminalState = store.StateFailed
 		}
 		metadata.Error = failErr.Error()
-		metadata.Retained = true
+		metadata.Retained = config.Intent == IntentFeat
 		_ = o.Store.WriteMetadata(metadata)
 		return Result{Metadata: metadata}, failErr
 	}
@@ -200,7 +215,7 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 				if err == nil {
 					err = removeErr
 					terminalState = store.StateFailed
-					metadata.Retained = true
+					metadata.Retained = config.Intent == IntentFeat
 				}
 				metadata.Error = appendError(metadata.Error, removeErr)
 			}
@@ -210,7 +225,7 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 				if err == nil {
 					err = removeErr
 					terminalState = store.StateFailed
-					metadata.Retained = true
+					metadata.Retained = config.Intent == IntentFeat
 				}
 				metadata.Error = appendError(metadata.Error, removeErr)
 			}
@@ -220,10 +235,23 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 				if err == nil {
 					err = removeErr
 					terminalState = store.StateFailed
-					metadata.Retained = true
+					metadata.Retained = config.Intent == IntentFeat
 				}
 				metadata.Error = appendError(metadata.Error, removeErr)
 			}
+		}
+		if baselineVolume != "" {
+			if removeErr := o.Docker.RemoveVolume(teardownCtx, baselineVolume); removeErr != nil {
+				if err == nil {
+					err = removeErr
+					terminalState = store.StateFailed
+					metadata.Retained = false
+				}
+				metadata.Error = appendError(metadata.Error, removeErr)
+			}
+		}
+		if config.Intent == IntentTest {
+			_ = o.Store.RemoveWorkspace(id)
 		}
 		if metadata.CompletedAt.IsZero() {
 			metadata.CompletedAt = time.Now()
@@ -255,14 +283,17 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 		return fail(err)
 	}
 	metadata.BaseSHA = baseSHA
-	if err := o.Git.ValidateBranch(ctx, root, config.OutputBranch); err != nil {
-		return fail(err)
+	var identity gitx.Identity
+	if config.Intent == IntentFeat {
+		if err := o.Git.ValidateBranch(ctx, root, config.OutputBranch); err != nil {
+			return fail(err)
+		}
+		identity, err = o.Git.Identity(ctx, root)
+		if err != nil {
+			return fail(err)
+		}
+		metadata.CommitAuthor = identity.Name + " <" + identity.Email + ">"
 	}
-	identity, err := o.Git.Identity(ctx, root)
-	if err != nil {
-		return fail(err)
-	}
-	metadata.CommitAuthor = identity.Name + " <" + identity.Email + ">"
 	if err := o.Store.WriteMetadata(metadata); err != nil {
 		return fail(err)
 	}
@@ -297,6 +328,17 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 
 	if err := o.Docker.SeedWorkspace(ctx, workspaceVolume, workspace, config.Image, id); err != nil {
 		return fail(err)
+	}
+	if config.Intent == IntentTest {
+		baselineVolume, err = o.Docker.CreateBaselineVolume(ctx, id)
+		if err != nil {
+			return fail(err)
+		}
+		metadata.BaselineVolume = baselineVolume
+		if err := o.Docker.SeedWorkspace(ctx, baselineVolume, workspace, config.Image, id); err != nil {
+			return fail(err)
+		}
+		_ = o.Store.WriteMetadata(metadata)
 	}
 	if adapter.Name() == "codex" {
 		// Mount an empty writable home now; credentials are copied only after repository setup succeeds.
@@ -372,13 +414,36 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 		return fail(err)
 	}
 	agentResult, err := agent.Run(ctx, o.Docker, container, adapter, agent.PromptContext{
-		Task: config.Task, BaseSHA: metadata.BaseSHA, Validation: config.Validation,
+		Task: config.Task, BaseSHA: metadata.BaseSHA, Validation: config.Validation, Intent: string(config.Intent),
 	}, agentOut, agentLog)
 	metadata.ExitCode = agentResult.ExitCode
 	if err != nil || agentResult.ExitCode != 0 {
 		if err == nil {
 			err = fmt.Errorf("agent exited with code %d", agentResult.ExitCode)
 		}
+		return fail(err)
+	}
+	checkIntegrity := func() error {
+		if config.Intent != IntentTest {
+			return nil
+		}
+		if err := writeState(store.StateChecking); err != nil {
+			return err
+		}
+		metadata.SourceIntegrity = "checking"
+		_ = o.Store.WriteMetadata(metadata)
+		detail, checkErr := o.Docker.CheckWorkspaceUnchanged(ctx, workspaceVolume, baselineVolume, config.Image, id)
+		if checkErr != nil {
+			metadata.SourceIntegrity = "failed"
+			metadata.IntegrityError = detail
+			_ = o.Store.WriteMetadata(metadata)
+			return checkErr
+		}
+		metadata.SourceIntegrity = "passed"
+		metadata.IntegrityError = ""
+		return o.Store.WriteMetadata(metadata)
+	}
+	if err := checkIntegrity(); err != nil {
 		return fail(err)
 	}
 
@@ -394,11 +459,25 @@ func (o Orchestrator) Launch(parent context.Context, config Config) (result Resu
 	validationOut := io.MultiWriter(validationLog, config.Output)
 	validationResult, validationErr := o.Docker.Exec(ctx, container, []string{"sh", "-lc", config.Validation}, nil, validationOut, validationLog)
 	metadata.ValidationCode = validationResult.ExitCode
+	integrityErr := checkIntegrity()
 	if validationErr != nil || validationResult.ExitCode != 0 {
 		if validationErr == nil {
 			validationErr = fmt.Errorf("validation exited with code %d", validationResult.ExitCode)
 		}
+		if integrityErr != nil {
+			validationErr = fmt.Errorf("%w; %v", validationErr, integrityErr)
+		}
 		return fail(validationErr)
+	}
+	if integrityErr != nil {
+		return fail(integrityErr)
+	}
+	if config.Intent == IntentTest {
+		terminalState = store.StateCompleted
+		metadata.Retained = false
+		_ = o.Store.RemoveWorkspace(id)
+		result.Metadata = metadata
+		return result, nil
 	}
 
 	if err := exportWorkspace(); err != nil {

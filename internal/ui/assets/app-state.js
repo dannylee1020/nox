@@ -11,6 +11,7 @@
   const terminalStates = new Set(["completed", "no_changes", "failed", "cancelled", "interrupted"]);
   const failedStates = new Set(["failed", "cancelled", "interrupted"]);
   const lifecycleLabels = ["Setup", "Agent", "Validation", "Published"];
+  const testLifecycleLabels = ["Setup", "Agent", "Integrity", "Validation", "Evidence"];
   const lifecyclePosition = {
     queued: 0,
     initializing: 0,
@@ -18,6 +19,7 @@
     starting: 0,
     setting_up: 0,
     agent_running: 1,
+    checking_integrity: 2,
     running: 1,
     execution: 1,
     validating: 2,
@@ -36,6 +38,7 @@
     running: "Agent working",
     execution: "Agent working",
     validating: "Running validation",
+    checking_integrity: "Checking source integrity",
     publishing: "Publishing result",
     pull_request: "Pull request ready",
     teardown: "Cleaning up sandbox",
@@ -86,28 +89,36 @@
     let macro = "Setup";
     if (state === "agent_running" || state === "running") macro = "Agent";
     if (state === "validating") macro = "Validation";
-    if (state === "publishing" || state === "teardown" || state === "completed") macro = "Published";
+    if (state === "checking_integrity") macro = "Integrity";
+    if (state === "publishing" || state === "teardown" || state === "completed") macro = run.mode === "test" ? "Evidence" : "Published";
     if (state === "no_changes") macro = "No changes";
     if (failedStates.has(state)) macro = displayState(state);
+    let detail = substageLabels[stage] || substageLabels[state] || displayState(stage || state);
+    if (run.mode === "test" && state === "completed") detail = "Evidence retained";
     return {
       macro,
-      detail: substageLabels[stage] || substageLabels[state] || displayState(stage || state),
+      detail,
       tone: stateTone(state)
     };
   }
 
   function lifecycleView(run) {
     const noChanges = run.state === "no_changes";
-    const labels = noChanges ? ["Setup", "Agent", "Validation", "No changes"] : lifecycleLabels.slice();
+    const test = run.mode === "test";
+    const labels = noChanges ? ["Setup", "Agent", "Validation", "No changes"] : test ? testLifecycleLabels.slice() : lifecycleLabels.slice();
     const complete = run.state === "completed" || noChanges;
-    const current = lifecyclePosition[run.state] ?? lifecyclePosition[run.stage];
+    let current = lifecyclePosition[run.state] ?? lifecyclePosition[run.stage];
+    if (test) {
+      if (run.state === "validating") current = 3;
+      if (run.state === "teardown" || run.state === "completed") current = 4;
+    }
     return {labels, complete, current};
   }
 
   function stateTone(value) {
     if (failedStates.has(value)) return "danger";
     if (value === "queued" || value === "initializing") return "warning";
-    if (value === "validating" || value === "publishing" || value === "teardown") return "info";
+    if (value === "validating" || value === "checking_integrity" || value === "publishing" || value === "teardown") return "info";
     if (value === "completed" || value === "no_changes" || value === "agent_running" || value === "running" || value === "setting_up") return "active";
     return "neutral";
   }

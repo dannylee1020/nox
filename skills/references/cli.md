@@ -1,6 +1,6 @@
 # Nox CLI reference
 
-Nox runs one coding task inside a local or remote Docker/gVisor sandbox and publishes validated changes to a new local branch or pull request.
+Nox runs one implementation or agent-driven end-to-end test inside a local or remote Docker/gVisor sandbox. Implementation runs publish validated changes; test runs retain validation evidence without publication.
 
 ## Setup
 
@@ -16,6 +16,7 @@ nox doctor
 
 ```bash
 nox launch \
+  --mode feat \
   --repo <repository-root> \
   --from <committed-ref> \
   --output-branch <new-local-branch> \
@@ -23,8 +24,20 @@ nox launch \
   --validate <command>
 ```
 
+For test mode, omit `--output-branch`:
+
+```bash
+nox launch \
+  --mode test \
+  --repo <repository-root> \
+  --from <committed-ref> \
+  --task-file <test-task-file> \
+  --validate <command>
+```
+
 Useful options:
 
+- `--mode feat|test` (defaults to `feat`)
 - `--network online|none`
 - `--image <runner-image>`
 - `--timeout <duration>`
@@ -39,6 +52,7 @@ When `NOX_REMOTE_URL` is configured, submit through the remote worker instead of
 
 ```bash
 nox submit \
+  --mode feat \
   --repo <repository-root> \
   --from <github-base-branch> \
   --title "<pull-request-title>" \
@@ -46,7 +60,7 @@ nox submit \
   --validate <command>
 ```
 
-`nox submit` reads `NOX_API_TOKEN`, resolves the selected branch from GitHub `origin`, submits the pinned commit, and polls until the worker reports a pull request, no changes, failure, or cancellation. Local uncommitted work is ignored. It does not run `nox doctor` locally.
+`nox submit` reads `NOX_API_TOKEN`, resolves the selected branch from GitHub `origin`, submits the pinned commit, and polls until the worker reports a pull request, evidence-only test completion, no changes, failure, or cancellation. `--title` is required only for feat mode. Local uncommitted work is ignored. It does not run `nox doctor` locally.
 
 Use `--detach --json` when a parent agent will monitor the run separately:
 
@@ -61,7 +75,7 @@ Nox reads `--task` or `--task-file` on the host. The sandbox agent does not rece
 
 When launching from a conversational agent, hydrate the structured contract in `task-contract.md` with the user's invocation and relevant context from that thread. Its stable sections capture the objective, hard and soft constraints, plan, affected surfaces, acceptance criteria, validation, and stop conditions. Sections may contain arbitrary Markdown; use `None specified` when no relevant content exists. `Context and extra` preserves useful information that does not fit elsewhere.
 
-For Codex, Nox prepends a deterministic execution envelope containing the resolved base commit and required validation command, then preserves the hydrated contract unchanged as the final prompt payload. Nox does not parse, summarize, or semantically normalize the contract. Codex is the only production agent in v0. The sandbox workspace starts from the committed `--from` ref; uncommitted changes and unrecorded context from the source checkout are not included.
+For Codex, Nox prepends a deterministic execution envelope containing the resolved base commit and required validation command, then preserves the hydrated contract unchanged as the final prompt payload. Test mode adds a tester-only responsibility: the agent may construct runtime state and imitate the user flow but must not implement or modify tracked source. Nox independently runs validation and checks tracked source integrity. Nox does not parse, summarize, or semantically normalize the contract. Codex is the only production agent in v0. The sandbox workspace starts from the committed `--from` ref; uncommitted changes and unrecorded context from the source checkout are not included.
 
 ## Monitor and inspect
 
@@ -96,6 +110,6 @@ A successful launch:
 - preserves the source checkout's branch, HEAD, and dirty changes;
 - removes the container and managed volumes after teardown.
 
-A failed or cancelled launch does not publish a branch. Nox retains the exported workspace and logs for inspection.
+A failed or cancelled implementation launch does not publish a branch and retains the exported workspace and logs for inspection. Test runs never publish, emit patches, or retain/export workspaces on success or failure; they retain metadata and setup, agent, and validation logs only.
 
-Nox does not push the caller's source branch, switch the source checkout, overwrite an existing local branch, or merge remote pull requests. Remote execution pushes only the worker-generated `nox/<run-id>` branch on the server.
+Nox does not push the caller's source branch, switch the source checkout, overwrite an existing local branch, or merge remote pull requests. Remote implementation execution pushes only the worker-generated `nox/<run-id>` branch on the server; test execution cannot push.

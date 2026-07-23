@@ -111,6 +111,8 @@ func (s *Server) runs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request.Network = normalizedNetwork(request.Network)
+	intent, _ := run.ParseIntent(request.Mode)
+	request.Mode = string(intent)
 	if request.TimeoutSeconds == 0 {
 		request.TimeoutSeconds = 7200
 	}
@@ -124,7 +126,7 @@ func (s *Server) runs(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "maximum concurrent runs reached"})
 		return
 	}
-	status := RunStatus{RunID: id, State: StateQueued, StartedAt: time.Now().UTC()}
+	status := RunStatus{RunID: id, Mode: request.Mode, State: StateQueued, StartedAt: time.Now().UTC()}
 	current := &job{status: status, request: request, cancel: cancel}
 	if err := s.writeJob(current); err != nil {
 		s.mu.Unlock()
@@ -197,7 +199,7 @@ func (s *Server) cancelRun(w http.ResponseWriter, id string) {
 
 func (s *Server) execute(ctx context.Context, id string, request RunRequest) {
 	s.setState(id, StateRunning, "execution", "")
-	publication, err := s.executor.Execute(ctx, id, request)
+	outcome, err := s.executor.Execute(ctx, id, request)
 	s.mu.Lock()
 	current, ok := s.jobs[id]
 	if !ok {
@@ -221,12 +223,32 @@ func (s *Server) execute(ctx context.Context, id string, request RunRequest) {
 		s.persistJob(current)
 		return
 	}
-	current.status.Branch = publication.Branch
-	current.status.Commit = publication.Commit
-	current.status.PullRequestURL = publication.PullRequestURL
-	if publication.NoChanges {
-		current.status.State = StateNoChanges
-		current.status.Stage = "completed"
+	if outcome.Mode != "" {
+		current.status.Mode = outcome.Mode
+	}
+	current.status.SourceIntegrity = outcome.SourceIntegrity
+	current.status.ValidationCode = outcome.ValidationCode
+	if outcome.Publication != nil {
+		current.status.Branch = outcome.Publication.Branch
+		current.status.Commit = outcome.Publication.Commit
+		current.status.PullRequestURL = outcome.Publication.PullRequestURL
+		if outcome.Publication.NoChanges {
+			current.status.State = StateNoChanges
+			current.status.Stage = "completed"
+			s.persistJob(current)
+			return
+		}
+	}
+	if current.status.Mode == string(run.IntentTest) {
+		current.status.State = StateCompleted
+		current.status.Stage = "evidence"
+		s.persistJob(current)
+		return
+	}
+	if outcome.Publication == nil {
+		current.status.State = StateFailed
+		current.status.Stage = "execution"
+		current.status.Error = "feature run completed without publication"
 		s.persistJob(current)
 		return
 	}
@@ -252,9 +274,10 @@ func (s *Server) writeJob(current *job) error {
 	}
 	status := current.status
 	return s.statusStore.Write(JobRecord{
-		RunID: status.RunID, Repository: current.request.Repository,
+		RunID: status.RunID, Mode: current.request.Mode, Repository: current.request.Repository,
 		BaseBranch: current.request.BaseBranch, BaseCommit: current.request.BaseCommit, Title: current.request.Title,
 		State: status.State, Stage: status.Stage, Error: status.Error,
+		SourceIntegrity: status.SourceIntegrity, ValidationCode: status.ValidationCode,
 		Branch: status.Branch, Commit: status.Commit, PullRequestURL: status.PullRequestURL,
 		StartedAt: status.StartedAt, CompletedAt: status.CompletedAt,
 	})
@@ -277,6 +300,10 @@ func (s *Server) authorized(r *http.Request) bool {
 }
 
 func validateRequest(request RunRequest) error {
+	intent, err := run.ParseIntent(request.Mode)
+	if err != nil {
+		return err
+	}
 	if _, _, err := ParseRepository(request.Repository); err != nil {
 		return err
 	}
@@ -289,8 +316,8 @@ func validateRequest(request RunRequest) error {
 	if !validBranch(request.BaseBranch) {
 		return fmt.Errorf("baseBranch is invalid")
 	}
-	if strings.TrimSpace(request.Title) == "" || len(request.Title) > 200 {
-		return fmt.Errorf("title is required and must be at most 200 characters")
+	if len(request.Title) > 200 || (intent == run.IntentFeat && strings.TrimSpace(request.Title) == "") {
+		return fmt.Errorf("title is required for feat mode and must be at most 200 characters")
 	}
 	if strings.TrimSpace(request.Task) == "" || strings.TrimSpace(request.Validation) == "" {
 		return fmt.Errorf("task and validation are required")

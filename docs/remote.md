@@ -1,14 +1,14 @@
 # Self-hosted remote execution
 
-Remote mode runs a trusted Nox API on one private Linux VM. Each request creates an ephemeral Docker/gVisor (`runsc`) sandbox, runs the repository's optional `.nox/setup.sh`, Codex, and validation, then creates a GitHub pull request for validated changes.
+Remote mode runs a trusted Nox API on one private Linux VM. Each request creates an ephemeral Docker/gVisor (`runsc`) sandbox, runs the repository's optional `.nox/setup.sh`, Codex, and validation, then either creates a GitHub pull request for implementation changes or completes as an evidence-only test run.
 
 ```text
 private client
   → nox serve on a private VM
   → Docker/runsc sandbox
-  → Codex + validation
-  → trusted branch push
-  → GitHub pull request
+  → Codex tester + validation
+  → implementation: trusted branch push → GitHub pull request
+  → test: validation evidence only
   → teardown
 ```
 
@@ -118,7 +118,7 @@ export NOX_REMOTE_URL=https://nox.internal.example
 export NOX_API_TOKEN=<private-api-token>
 ```
 
-When the user invokes `$nox`, the skill runs `nox submit --detach`, returns the run ID, and starts a background worker that polls `nox inspect --remote`. The worker reports the pull request URL when complete. The client does not require local Docker or `nox doctor`.
+When the user invokes `$nox`, the skill runs `nox submit --detach`, returns the run ID, and starts a background worker that polls `nox inspect --remote`. Implementation workers report the pull request URL; test workers report validation findings and evidence-only completion. The client does not require local Docker or `nox doctor`.
 
 Cancel an active remote run explicitly with:
 
@@ -138,6 +138,7 @@ curl -fsS -X POST http://127.0.0.1:8080/v1/runs \
     "repository": "owner/repository",
     "baseBranch": "main",
     "baseCommit": "0123456789abcdef0123456789abcdef01234567",
+    "mode": "feat",
     "title": "Implement the requested change",
     "task": "# Nox execution contract v1\n...",
     "validation": "go test ./...",
@@ -162,7 +163,7 @@ curl -fsS -X POST \
   http://127.0.0.1:8080/v1/runs/<run-id>/cancel
 ```
 
-A successful status includes the generated `nox/<run-id>` branch, result commit, and `pullRequestUrl`. Failed, cancelled, timed-out, and no-change runs do not create pull requests.
+A successful implementation status includes the generated `nox/<run-id>` branch, result commit, and `pullRequestUrl`. A successful test status has `mode: "test"`, validation/source-integrity evidence, and no publication fields. Failed, cancelled, timed-out, and no-change runs do not create pull requests. Test runs retain metadata and logs only; they do not expose arbitrary artifacts or workspaces.
 
 The server accepts up to `NOX_MAX_CONCURRENT_RUNS` active runs (default `5`). `nox serve --max-concurrent-runs` overrides the environment value. Submissions above the limit return `429`; there is no durable queue or restart recovery.
 

@@ -18,6 +18,7 @@ const (
 	StateAgentRunning State = "agent_running"
 	StateValidating   State = "validating"
 	StatePublishing   State = "publishing"
+	StateChecking     State = "checking_integrity"
 	StateCompleted    State = "completed"
 	StateFailed       State = "failed"
 	StateCancelled    State = "cancelled"
@@ -26,12 +27,16 @@ const (
 
 type Metadata struct {
 	RunID             string    `json:"runId"`
+	Intent            string    `json:"intent,omitempty"`
 	Repo              string    `json:"repo"`
 	RepositoryLabel   string    `json:"repositoryLabel,omitempty"`
 	From              string    `json:"from"`
 	BaseSHA           string    `json:"baseSha"`
-	OutputBranch      string    `json:"outputBranch"`
+	OutputBranch      string    `json:"outputBranch,omitempty"`
 	ResultSHA         string    `json:"resultSha,omitempty"`
+	SourceIntegrity   string    `json:"sourceIntegrity,omitempty"`
+	IntegrityError    string    `json:"integrityError,omitempty"`
+	BaselineVolume    string    `json:"baselineVolume,omitempty"`
 	Agent             string    `json:"agent"`
 	AgentPermissions  string    `json:"agentPermissions,omitempty"`
 	CommitAuthor      string    `json:"commitAuthor,omitempty"`

@@ -28,6 +28,19 @@ test("selection always belongs to the effective filter", () => {
   });
 });
 
+test("test mode exposes integrity and evidence-only lifecycle", () => {
+  assert.deepEqual(ui.stageSummary({mode: "test", state: "checking_integrity", stage: "checking_integrity"}), {
+    macro: "Integrity",
+    detail: "Checking source integrity",
+    tone: "info"
+  });
+  assert.deepEqual(ui.lifecycleView({mode: "test", state: "completed", stage: "completed"}), {
+    labels: ["Setup", "Agent", "Integrity", "Validation", "Evidence"],
+    complete: true,
+    current: 4
+  });
+});
+
 test("live substages preserve the four-stage lifecycle", () => {
   assert.deepEqual(ui.stageSummary({state: "cloning", stage: "cloning"}), {
     macro: "Setup",

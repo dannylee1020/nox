@@ -43,8 +43,8 @@ Then open `http://127.0.0.1:8081` on the operator machine. The UI process needs 
 
 ## Evidence and security
 
-The console exposes repository labels, lifecycle state, timing, output branches, result commits, pull request links, errors, and setup, agent, and validation logs. It intentionally omits container IDs, workspace paths, volume names, credential paths, and task contracts.
+The console exposes repository labels, run mode, lifecycle state, timing, validation/source-integrity state, output branches, result commits, pull request links, errors, and setup, agent, and validation logs. Test runs show evidence-only completion and no publication fields. It intentionally omits container IDs, workspace paths, volume names, credential paths, and task contracts.
 
 Logs are rendered as plain text, but may still contain sensitive output produced by repository tools. Loopback binding and host access through SSH are the security boundary.
 
-Remote lifecycle files support monitoring, not recovery. If the coordinator restarts, nonterminal records from its previous instance appear as interrupted.
+Remote lifecycle files support monitoring, not recovery. If the coordinator restarts, nonterminal records from its previous instance appear as interrupted. Test evidence remains limited to metadata and logs; the UI does not expose arbitrary test artifacts.

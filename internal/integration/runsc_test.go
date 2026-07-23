@@ -117,6 +117,52 @@ func TestRunscLaunch(t *testing.T) {
 	}
 }
 
+func TestRunscTestModeDiscardsWorkspaceAndPublishesNoCode(t *testing.T) {
+	if os.Getenv("NOX_RUNSC_INTEGRATION") != "1" {
+		t.Skip("set NOX_RUNSC_INTEGRATION=1 on a Linux Docker or Colima host to run the real test mode")
+	}
+	source := t.TempDir()
+	initIntegrationRepo(t, source)
+	state := t.TempDir()
+	orchestrator := noxrun.New()
+	orchestrator.Adapter = integrationAdapter{command: "nox-fixture-tool > runtime.txt"}
+	result, err := orchestrator.Launch(context.Background(), noxrun.Config{
+		RunID: "runsc-test", Repo: source, From: "main", Intent: noxrun.IntentTest,
+		Task: "imitate a user invoking the installed application", Validation: "test \"$(cat runtime.txt)\" = integration-ok && test \"$(nox-fixture-tool)\" = integration-ok",
+		Network: "none", Image: runnerImage(), StateRoot: state, Timeout: 5 * time.Minute,
+		Output: io.Discard, ErrorOutput: io.Discard,
+	})
+	if err != nil {
+		var logs strings.Builder
+		for _, name := range []string{"setup.log", "agent.log", "validation.log"} {
+			if data, readErr := os.ReadFile(filepath.Join(state, result.Metadata.RunID, name)); readErr == nil {
+				fmt.Fprintf(&logs, "\n==> %s <==\n%s", name, data)
+			}
+		}
+		t.Fatalf("%v%s", err, logs.String())
+	}
+	if result.Metadata.Intent != string(noxrun.IntentTest) || result.Metadata.State != store.StateCompleted || result.Metadata.SourceIntegrity != "passed" {
+		t.Fatalf("result = %#v", result)
+	}
+	if result.Metadata.Retained || result.Metadata.ResultSHA != "" || result.Metadata.OutputBranch != "" {
+		t.Fatalf("test published or retained code: %#v", result.Metadata)
+	}
+	if _, err := os.Stat(result.Metadata.Workspace); !os.IsNotExist(err) {
+		t.Fatalf("test workspace survived: %v", err)
+	}
+	branchCheck := exec.CommandContext(context.Background(), "git", "show-ref", "--verify", "--quiet", "refs/heads/nox/runsc-test")
+	branchCheck.Dir = source
+	if err := branchCheck.Run(); err == nil {
+		t.Fatal("unexpected test branch")
+	}
+	volumes := exec.CommandContext(context.Background(), "docker", "volume", "ls", "-q", "--filter", "label=io.nox.run-id="+result.Metadata.RunID)
+	if output, err := volumes.CombinedOutput(); err != nil {
+		t.Fatalf("list test volumes: %v\n%s", err, output)
+	} else if strings.TrimSpace(string(output)) != "" {
+		t.Fatalf("test volume was retained: %s", output)
+	}
+}
+
 func TestRepositoryGoSetup(t *testing.T) {
 	if os.Getenv("NOX_GO_SETUP_INTEGRATION") != "1" {
 		t.Skip("set NOX_GO_SETUP_INTEGRATION=1 to verify this repository's networked Go setup")

@@ -30,8 +30,10 @@ Commands:
   nox cancel --remote <run-id>
   nox doctor
   nox serve
-  nox launch --repo . --from main --output-branch nox/change --task "..." --validate "..."
-  nox submit --repo . --from main --title "..." --task-file contract.md --validate "..."
+  nox launch --mode feat --repo . --from main --output-branch nox/change --task "..." --validate "..."
+  nox launch --mode test --repo . --from main --task-file contract.md --validate "..."
+  nox submit --mode feat --repo . --from main --title "..." --task-file contract.md --validate "..."
+  nox submit --mode test --repo . --from main --task-file contract.md --validate "..."
   nox inspect [--remote] <run-id>
   nox diff <run-id>
   nox cleanup <run-id>
@@ -192,7 +194,8 @@ func launch(args []string) error {
 	fs.SetOutput(os.Stderr)
 	repo := fs.String("repo", ".", "local Git repository")
 	from := fs.String("from", "", "local branch or ref to launch from")
-	outputBranch := fs.String("output-branch", "", "new local branch to create after validation")
+	mode := fs.String("mode", "feat", "run mode: feat or test")
+	outputBranch := fs.String("output-branch", "", "new local branch to create after validation (feat mode only)")
 	task := fs.String("task", "", "agent task")
 	taskFile := fs.String("task-file", "", "file containing the agent task")
 	validate := fs.String("validate", "", "explicit validation command")
@@ -210,6 +213,13 @@ func launch(args []string) error {
 			return nil
 		}
 		return err
+	}
+	intent, err := run.ParseIntent(*mode)
+	if err != nil {
+		return err
+	}
+	if intent == run.IntentTest && *outputBranch != "" {
+		return errors.New("--output-branch cannot be used in test mode")
 	}
 	if *task != "" && *taskFile != "" {
 		return errors.New("use only one of --task and --task-file")
@@ -239,7 +249,7 @@ func launch(args []string) error {
 	defer stop()
 	orchestrator := run.New()
 	result, err := orchestrator.Launch(ctx, run.Config{
-		Repo: *repo, From: *from, OutputBranch: *outputBranch,
+		Repo: *repo, From: *from, Intent: intent, OutputBranch: *outputBranch,
 		Task: *task, Validation: *validate, Network: *network,
 		Image: *image, StateRoot: *stateRoot, CodexHome: *codexHome, CPU: *cpu, Memory: *memory,
 		PIDs: *pids, Timeout: *timeout, Output: output, ErrorOutput: os.Stderr,
@@ -253,6 +263,10 @@ func launch(args []string) error {
 	}
 	if err != nil {
 		return err
+	}
+	if result.Metadata.Intent == string(run.IntentTest) {
+		fmt.Printf("completed: test passed; evidence retained under %s\n", filepath.Dir(result.Metadata.Workspace))
+		return nil
 	}
 	if result.NoChanges {
 		fmt.Printf("completed: no changes; no branch created\n")
@@ -367,7 +381,7 @@ func cleanup(args []string) error {
 				return removeErr
 			}
 		}
-		for _, volume := range []string{metadata.WorkspaceVolume, metadata.CodexVolume} {
+		for _, volume := range []string{metadata.WorkspaceVolume, metadata.BaselineVolume, metadata.CodexVolume} {
 			if volume == "" {
 				continue
 			}

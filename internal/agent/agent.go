@@ -14,6 +14,7 @@ type PromptContext struct {
 	Task       string
 	BaseSHA    string
 	Validation string
+	Intent     string
 }
 
 type Adapter interface {
@@ -39,12 +40,20 @@ func (Codex) Command() []string {
 }
 
 func (Codex) Prompt(context PromptContext) string {
-	return fmt.Sprintf(`# Nox sandbox execution envelope v1
-
-Execute and test the delegated contract below.
+	role := `Execute and test the delegated contract below.
 Do not revisit established product or architecture decisions.
 Use implementation judgment only where flexibility remains.
-Report blockers instead of inventing material decisions.
+Report blockers instead of inventing material decisions.`
+	if context.Intent == "test" {
+		role = `Act only as an end-to-end tester for the existing implementation.
+Do not implement fixes, edit tracked source, rewrite tests, or change tracked configuration.
+You may install dependencies, create runtime state, start services, seed data, and use temporary or ignored paths as needed.
+Imitate the real-world user workflow described by the contract, observe the outcome, and report findings.
+Do not claim success from your own narrative; Nox will run the required validation independently.`
+	}
+	return fmt.Sprintf(`# Nox sandbox execution envelope v1
+
+%s
 
 Workspace: /workspace
 Base commit: %s
@@ -53,7 +62,7 @@ Nox will run this validation again after agent execution.
 
 ## Hydrated execution contract
 
-%s`, context.BaseSHA, context.Validation, context.Task)
+%s`, role, context.BaseSHA, context.Validation, context.Task)
 }
 
 func Run(ctx context.Context, docker sandbox.Docker, container sandbox.Container, adapter Adapter, prompt PromptContext, stdout, stderr io.Writer) (execx.Result, error) {

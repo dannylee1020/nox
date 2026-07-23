@@ -16,11 +16,12 @@ import (
 )
 
 type fakeDockerRunner struct {
-	volumePath string
-	removed    bool
-	agentDone  bool
-	setupRuns  int
-	setupCode  int
+	volumePath    string
+	removed       bool
+	agentDone     bool
+	setupRuns     int
+	setupCode     int
+	integrityCode int
 }
 
 type testAdapter struct {
@@ -94,6 +95,9 @@ func (f *fakeDockerRunner) Stream(_ context.Context, command execx.Command, stdo
 		f.setupRuns++
 		_, _ = io.WriteString(stdout, "setup ok\n")
 		return execx.Result{ExitCode: f.setupCode}, nil
+	}
+	if strings.Contains(joined, "node -e") {
+		return execx.Result{ExitCode: f.integrityCode}, nil
 	}
 	if strings.Contains(joined, " false") {
 		return execx.Result{ExitCode: 1}, nil
@@ -334,6 +338,75 @@ func TestLaunchNoChangesDoesNotPublish(t *testing.T) {
 	}
 	if branch := assertGit(t, source, "show-ref", "--verify", "--quiet", "refs/heads/nox/no-change"); branch != "" {
 		t.Fatalf("unexpected branch output: %q", branch)
+	}
+}
+
+func TestLaunchTestModeRunsAgentValidationAndDiscardsWorkspace(t *testing.T) {
+	source := t.TempDir()
+	initRunFixture(t, source)
+	state := t.TempDir()
+	fake := &fakeDockerRunner{}
+	orchestrator := newTestOrchestrator("no-op")
+	orchestrator.Docker = sandbox.Docker{Runner: fake}
+	result, err := orchestrator.Launch(context.Background(), Config{
+		RunID: "test-run", Repo: source, From: "main", Intent: IntentTest,
+		Task: "imitate the user workflow", Validation: "true",
+		Network: "none", Image: "nox-runner:v0", StateRoot: state, Timeout: time.Minute,
+		Output: io.Discard, ErrorOutput: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Metadata.Intent != string(IntentTest) || result.Metadata.State != store.StateCompleted {
+		t.Fatalf("metadata = %#v", result.Metadata)
+	}
+	if result.Metadata.SourceIntegrity != "passed" {
+		t.Fatalf("source integrity = %q", result.Metadata.SourceIntegrity)
+	}
+	if result.Metadata.Retained || result.Metadata.ResultSHA != "" || result.Metadata.OutputBranch != "" {
+		t.Fatalf("test unexpectedly retained or published: %#v", result.Metadata)
+	}
+	if _, err := os.Stat(filepath.Join(state, "test-run", "workspace")); !os.IsNotExist(err) {
+		t.Fatalf("test workspace survived: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(state, "test-run", "agent.log")); err != nil {
+		t.Fatalf("agent evidence missing: %v", err)
+	}
+	if branch := assertGit(t, source, "show-ref", "--verify", "--quiet", "refs/heads/nox/test-run"); branch != "" {
+		t.Fatalf("unexpected test branch output: %q", branch)
+	}
+}
+
+func TestLaunchTestModeFailsOnTrackedSourceIntegrity(t *testing.T) {
+	source := t.TempDir()
+	initRunFixture(t, source)
+	state := t.TempDir()
+	fake := &fakeDockerRunner{integrityCode: 7}
+	orchestrator := newTestOrchestrator("no-op")
+	orchestrator.Docker = sandbox.Docker{Runner: fake}
+	result, err := orchestrator.Launch(context.Background(), Config{
+		RunID: "integrity-failure", Repo: source, From: "main", Intent: IntentTest,
+		Task: "test without edits", Validation: "true",
+		Network: "none", Image: "nox-runner:v0", StateRoot: state, Timeout: time.Minute,
+		Output: io.Discard, ErrorOutput: io.Discard,
+	})
+	if err == nil || !strings.Contains(err.Error(), "integrity") {
+		t.Fatalf("error = %v", err)
+	}
+	if result.Metadata.SourceIntegrity != "failed" || result.Metadata.Retained {
+		t.Fatalf("metadata = %#v", result.Metadata)
+	}
+	if _, err := os.Stat(filepath.Join(state, "integrity-failure", "workspace")); !os.IsNotExist(err) {
+		t.Fatalf("test workspace survived: %v", err)
+	}
+}
+
+func TestLaunchRejectsTestOutputBranch(t *testing.T) {
+	source := t.TempDir()
+	initRunFixture(t, source)
+	_, err := New().Launch(context.Background(), Config{Repo: source, From: "main", Intent: IntentTest, OutputBranch: "nox/invalid", Task: "test", Validation: "true"})
+	if err == nil || !strings.Contains(err.Error(), "cannot be used in test mode") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
