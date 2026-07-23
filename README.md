@@ -1,6 +1,6 @@
 # Nox
 
-Nox is a sandbox for delegated coding work. It gives coding agents an isolated environment, requires explicit validation, and publishes only validated results without changing the caller's checkout.
+Nox is a sandbox environment for AI agents. It provides safe, isolated environment for agents to execute and test code before pushing to production.
 
 ```text
 task + committed source
@@ -9,7 +9,7 @@ isolated gVisor sandbox
         ↓
 setup → agent → validation
         ↓
-trusted publication
+implementation publication OR test evidence
 ```
 
 ## Why Nox
@@ -21,31 +21,22 @@ Nox is designed to be invoked by an agent through the `$nox` skill. Humans defin
 ## Core components
 
 - **Agent interface** — the `$nox` skill turns conversation context into a self-contained task and delegates it without blocking the main session.
-- **Orchestrator** — resolves an exact source commit, creates the run, moves it through setup, execution, validation, publication, and teardown.
-- **Sandbox** — runs repository setup, the coding agent, and validation inside an isolated Docker container using gVisor `runsc`.
+- **Orchestrator** — resolves an exact source commit, creates the run, moves it through setup, agent execution, validation, outcome, and teardown.
+- **Sandbox** — runs repository setup, the agent, and validation inside an isolated Docker container using gVisor `runsc`.
 - **Validator** — executes the required validation command independently of the agent's own claims.
-- **Trusted publisher** — reconstructs the result outside the sandbox and publishes a host-generated commit.
-- **Run evidence** — retains metadata, setup output, agent output, validation output, and the resulting patch for inspection.
+- **Trusted publisher** — reconstructs implementation results outside the sandbox and publishes a host-generated commit.
+- **Run evidence** — retains metadata, setup output, agent output, validation output, and implementation patches; test runs retain logs and metadata only.
 
 ## Execution modes
 
-| Mode | Source | Execution edge | Validated result |
+| Execution | Source | Execution edge | Validated result |
 | --- | --- | --- | --- |
-| Local | Committed local ref | Linux host or persistent Colima VM | New local branch |
-| Remote | Pinned GitHub ref | Private Linux Nox worker | GitHub branch and pull request |
+| Local implementation | Committed local ref | Linux host or persistent Colima VM | New local branch |
+| Remote implementation | Pinned GitHub ref | Private Linux Nox worker | GitHub branch and pull request |
+| Local test | Committed local ref | Linux host or persistent Colima VM | Evidence-only completion; no code publication |
+| Remote test | Pinned GitHub ref | Private Linux Nox worker | Evidence-only completion; no code publication |
 
 Both modes use the same sandbox and validation lifecycle. Local execution is the simplest path for individual development; remote execution lets agents submit work asynchronously to a self-hosted worker.
-
-## Core guarantees
-
-- Runs start from an exact committed source snapshot. Dirty and untracked caller changes are excluded.
-- gVisor `runsc` is mandatory. Nox fails closed instead of falling back to `runc`.
-- Repository-owned setup runs before the coding agent in the same environment later used for validation.
-- Validation is an explicit publication gate. Failed or cancelled work is never published.
-- Sandbox-controlled Git metadata is not trusted for publication.
-- The caller's checkout is never switched, reset, mounted into the sandbox, or modified.
-- Each run has isolated workspace and credential volumes that are removed during teardown.
-- Logs and patches remain available as evidence after the sandbox exits.
 
 ## Install
 
@@ -79,12 +70,26 @@ The underlying local CLI is also available directly:
 
 ```bash
 nox launch \
+  --mode feat \
   --repo . \
   --from main \
   --output-branch nox/example \
   --task "Implement the requested change" \
   --validate "go test ./..."
 ```
+
+For agent-driven end-to-end testing, omit publication inputs:
+
+```bash
+nox launch \
+  --mode test \
+  --repo . \
+  --from main \
+  --task-file test-contract.md \
+  --validate "npm run e2e"
+```
+
+Test mode lets the tester construct dependencies and imitate the supplied real-world workflow. It retains setup, agent, validation, and metadata evidence, but no workspace, patch, branch, or pull request.
 
 ## View tasks
 
@@ -107,7 +112,7 @@ nox inspect --remote <run-id>
 nox diff <run-id>      inspect the published patch
 ```
 
-Nox does not automatically switch to, merge, or push a local result branch.
+Nox does not automatically switch to, merge, or push a local result branch. Test mode cannot create one.
 
 ## Security boundary
 
@@ -122,6 +127,7 @@ Repository setup runs before Codex credentials are copied into the sandbox, but 
 - Remote source and publication use GitHub.
 - Remote execution is self-hosted and single-node; durable queue and restart recovery are not included.
 - Validation runs in the same sandbox as the agent rather than a separate clean-room environment.
+- Test mode preserves logs and metadata only; bounded screenshots, reports, and downloadable artifacts are not supported yet.
 
 ## Development
 
